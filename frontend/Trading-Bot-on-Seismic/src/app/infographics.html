@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Seismic Bot Architecture Infographic</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 500px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 300px;
+            max-height: 350px;
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 350px;
+                max-height: 400px;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 font-sans antialiased">
+
+    <header class="container mx-auto max-w-7xl p-8 sm:p-12 text-center">
+        <h1 class="text-4xl sm:text-5xl font-black text-cyan-400 mb-4">The Seismic Confidential Trading Bot</h1>
+        <p class="text-lg sm:text-xl text-gray-300 max-w-3xl mx-auto">
+            An infographic visualizing a full-stack architecture that leverages Seismic's encrypted blockchain to execute private, automated crypto trades.
+        </p>
+    </header>
+
+    <main class="container max-w-7xl mx-auto p-4 sm:p-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+        <section class="lg:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div class="bg-gray-800 rounded-lg shadow-2xl p-6 sm:p-8 border-t-4 border-red-500">
+                <h2 class="text-3xl font-bold mb-4 text-red-400 flex items-center">
+                    <span class="text-4xl mr-3"></span> The Problem
+                </h2>
+                <p class="text-lg mb-2">
+                    On traditional public blockchains, every transaction is transparent. For trading, this is a critical flaw.
+                </p>
+                <ul class="list-none space-y-2">
+                    <li class="flex items-center"><span class="text-red-400 mr-2 font-bold">»</span> Malicious front-running based on public entry prices.</li>
+                    <li class="flex items-center"><span class="text-red-400 mr-2 font-bold">»</span> Exposure of private wallet balances and total PnL.</li>
+                    <li class="flex items-center"><span class="text-red-400 mr-2 font-bold">»</span> Inability to protect proprietary trading strategies on-chain.</li>
+                </ul>
+            </div>
+            <div class="bg-gray-800 rounded-lg shadow-2xl p-6 sm:p-8 border-t-4 border-cyan-400">
+                <h2 class="text-3xl font-bold mb-4 text-cyan-400 flex items-center">
+                    <span class="text-4xl mr-3"></span> The Seismic Solution
+                </h2>
+                <p class="text-lg mb-2">
+                    By dividing logic and state, we use a Confidential Smart Contract (CSC) on Seismic to shield all sensitive financial data.
+                </p>
+                <ul class="list-none space-y-2">
+                    <li class="flex items-center"><span class="text-cyan-400 mr-2 font-bold">»</span> Encrypts balance, entry/exit prices, and PnL on-chain.</li>
+                    <li class="flex items-center"><span class="text-cyan-400 mr-2 font-bold">»</span> Exposes only non-sensitive data, like trade status.</li>
+                    <li class="flex items-center"><span class="text-cyan-400 mr-2 font-bold">»</span> Enables secure, private, and automated strategy execution.</li>
+                </ul>
+            </div>
+        </section>
+
+        <section class="lg:col-span-3 bg-gray-800 rounded-lg shadow-2xl p-6 sm:p-8">
+            <h2 class="text-3xl font-bold text-center mb-6 text-yellow-400">High-Level Architecture</h2>
+            <p class="text-lg text-gray-300 max-w-3xl mx-auto text-center mb-8">
+                The system is split into two environments: an off-chain "Brain" for analysis and an on-chain "Wallet" for confidential execution and state.
+            </p>
+            <div class="flex flex-col md:flex-row gap-6 md:gap-0 items-stretch">
+                <div class="flex-1 bg-gray-700 rounded-lg p-6 shadow-lg">
+                    <h3 class="text-2xl font-bold mb-4 text-center text-cyan-400">🧠 Off-Chain (The Brain)</h3>
+                    <p class="text-center mb-4">Public computation and analysis.</p>
+                    <ul class="list-none space-y-3">
+                        <li class="bg-gray-800 p-3 rounded-md shadow"><strong>1. Data Feeder:</strong> Gathers market prices & news.</li>
+                        <li class="bg-gray-800 p-3 rounded-md shadow"><strong>2. Decision Engine:</strong> Runs the strategy and computes trades.</li>
+                        <li class="bg-gray-800 p-3 rounded-md shadow"><strong>3. UI Frontend:</strong> Secure dashboard for the owner.</li>
+                    </ul>
+                </div>
+
+                <div class="flex items-center justify-center text-cyan-400 text-5xl font-bold p-4 md:p-8">
+                    <span class="hidden md:block">→</span>
+                    <span class="block md:hidden">↓</span>
+                </div>
+
+                <div class="flex-1 bg-gray-700 rounded-lg p-6 shadow-lg">
+                    <h3 class="text-2xl font-bold mb-4 text-center text-purple-400">🔒 On-Chain (The Wallet)</h3>
+                    <p class="text-center mb-4">Private state and execution.</p>
+                    <ul class="list-none space-y-3">
+                        <li class="bg-gray-800 p-3 rounded-md shadow"><strong>1. Seismic CSC:</strong> Holds encrypted balance, PnL, & entry prices.</li>
+                        <li class="bg-gray-800 p-3 rounded-md shadow"><strong>2. Execution Handler:</strong> Processes encrypted trade instructions.</li>
+                        <li class="bg-gray-800 p-3 rounded-md shadow"><strong>3. Seismic Testnet:</strong> The execution environment.</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <section class="lg:col-span-3 bg-gray-800 rounded-lg shadow-2xl p-6 sm:p-8">
+            <h2 class="text-3xl font-bold text-center mb-6 text-yellow-400">The Data Privacy Model: Public vs. Private</h2>
+            <p class="text-lg text-gray-300 max-w-3xl mx-auto text-center mb-8">
+                The core of the architecture is the on-chain data split. A traditional blockchain makes all trade data public, while Seismic hides the sensitive components.
+            </p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+                <div>
+                    <h3 class="text-2xl font-bold text-center mb-4 text-red-400">Traditional Blockchain</h3>
+                    <div class="chart-container">
+                        <canvas id="traditionalChart"></canvas>
+                    </div>
+                    <p class="text-center mt-4 text-gray-300">
+                        All sensitive data, including your balance, entry price, and PnL, is 100% public and visible to everyone.
+                    </p>
+                </div>
+                <div>
+                    <h3 class="text-2xl font-bold text-center mb-4 text-cyan-400">Seismic Confidential Blockchain</h3>
+                    <div class="chart-container">
+                        <canvas id="seismicChart"></canvas>
+                    </div>
+                    <p class="text-center mt-4 text-gray-300">
+                        Only non-sensitive data is public. Your balance, trade size, PnL, and strategy parameters remain fully encrypted and private.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <section class="lg:col-span-3 bg-gray-800 rounded-lg shadow-2xl p-6 sm:p-8">
+            <h2 class="text-3xl font-bold text-center mb-6 text-yellow-400">Confidential Trade Lifecycle (HTML Flowchart)</h2>
+            <p class="text-lg text-gray-300 max-w-3xl mx-auto text-center mb-8">
+                The trade process ensures privacy at every step by keeping sensitive computation inside the Confidential Smart Contract (CSC).
+            </p>
+            <div class="flex flex-col items-center">
+                
+                <div class="w-full max-w-2xl bg-gray-700 rounded-lg p-6 shadow-lg border-l-4 border-cyan-400">
+                    <h3 class="text-2xl font-bold mb-2 text-cyan-400">1. Trade Initiation (Entry)</h3>
+                    <p class="text-gray-200">The off-chain <span class="font-bold text-white">Decision Engine</span> detects a signal and sends an encrypted payload (Action: BUY, Size, Slippage) to the CSC. The CSC privately verifies the <span class="font-bold text-white">Encrypted Balance</span>, records the <span class="font-bold text-white">Encrypted Entry Price</span>, and sets the public status to <span class="font-bold text-cyan-300">'Active'</span>.</p>
+                </div>
+
+                <div class="text-cyan-400 text-4xl font-bold my-4">↓</div>
+
+                <div class="w-full max-w-2xl bg-gray-700 rounded-lg p-6 shadow-lg border-l-4 border-yellow-400">
+                    <h3 class="text-2xl font-bold mb-2 text-yellow-400">2. Trade Management (Take-Profit)</h3>
+                    <p class="text-gray-200">The off-chain Engine monitors the public market price. It sends an encrypted query to the CSC: "Is `CurrentPrice` > `EncryptedEntryPrice` + `EncryptedProfitTarget`?" The CSC performs this comparison <span class="font-bold text-white">confidentially</span> and returns only a simple <span class="font-bold text-white">True/False</span>, revealing no private data.</p>
+                </div>
+
+                <div class="text-cyan-400 text-4xl font-bold my-4">↓</div>
+
+                <div class="w-full max-w-2xl bg-gray-700 rounded-lg p-6 shadow-lg border-l-4 border-green-400">
+                    <h3 class="text-2xl font-bold mb-2 text-green-400">3. Trade Finalization (Exit)</h3>
+                    <p class="text-gray-200">When the check is `True`, the Engine sends an <span class="font-bold text-white">Encrypted SELL</span> instruction. The CSC confidentially calculates the <span class="font-bold text-white">Encrypted PnL</span>, updates the <span class="font-bold text-white">Encrypted WalletBalance</span>, and sets the public status to <span class="font-bold text-green-300">'Closed'</span>. The owner can view their private PnL later via the UI.</p>
+                </div>
+
+            </div>
+        </section>
+
+        <section class="lg:col-span-2 bg-gray-800 rounded-lg shadow-2xl p-6 sm:p-8">
+            <h2 class="text-3xl font-bold text-center mb-6 text-yellow-400">Component Role Comparison</h2>
+            <p class="text-lg text-gray-300 max-w-3xl mx-auto text-center mb-8">
+                This radar chart compares the primary roles of the off-chain and on-chain components across key operational domains.
+            </p>
+            <div class="chart-container" style="max-width: 600px; height: 350px; @media (min-width: 768px) { height: 450px; }">
+                <canvas id="componentRadarChart"></canvas>
+            </div>
+        </section>
+
+        <section class="lg:col-span-1 bg-gray-800 rounded-lg shadow-2xl p-6 sm:p-8">
+            <h2 class="text-3xl font-bold text-center mb-6 text-yellow-400">Key Benefits</h2>
+            <p class="text-lg text-gray-300 text-center mb-8">
+                The architecture provides tangible, high-impact advantages for traders.
+            </p>
+            <div class="space-y-6">
+                <div class="bg-gray-700 rounded-lg p-6 text-center shadow-lg">
+                    <div class="text-5xl font-black text-cyan-400">90%+</div>
+                    <div class="text-xl font-bold mt-2">Data Privacy</div>
+                    <p class="text-gray-300">Critical financial data (PnL, balance) is kept encrypted.</p>
+                </div>
+                <div class="bg-gray-700 rounded-lg p-6 text-center shadow-lg">
+                    <div class="text-5xl font-black text-purple-400">100%</div>
+                    <div class="text-xl font-bold mt-2">On-Chain Logic</div>
+                    <p class="text-gray-300">Trade execution logic is verified on-chain, not just on a server.</p>
+                </div>
+                <div class="bg-gray-700 rounded-lg p-6 text-center shadow-lg">
+                    <div class="text-5xl font-black text-yellow-400">24/7</div>
+                    <div class="text-xl font-bold mt-2">Automated Strategy</div>
+                    <p class="text-gray-300">Secure, automated execution of your trading strategy.</p>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <footer class="lg:col-span-3 text-center p-12 mt-8 border-t border-gray-700">
+        <p class="text-gray-500">Seismic Confidential Trading Bot Architecture | A Canvas Infographic</p>
+    </footer>
+
+    <script>
+        const chartColors = {
+            cyan: '#22d3ee',
+            yellow: '#facc15',
+            purple: '#a78bfa',
+            red: '#f87171',
+            green: '#4ade80',
+            gray: '#6b7280',
+            darkGray: '#374151'
+        };
+
+        const MAX_LABEL_LEN = 16;
+
+        function wrapLabels(labels) {
+            return labels.map(label => {
+                if (label.length <= MAX_LABEL_LEN) {
+                    return label;
+                }
+                const words = label.split(' ');
+                const lines = [];
+                let currentLine = '';
+                for (const word of words) {
+                    if ((currentLine + ' ' + word).trim().length > MAX_LABEL_LEN) {
+                        lines.push(currentLine.trim());
+                        currentLine = word;
+                    } else {
+                        currentLine = (currentLine + ' ' + word).trim();
+                    }
+                }
+                if (currentLine) {
+                    lines.push(currentLine.trim());
+                }
+                return lines;
+            });
+        }
+
+        function getTooltipCallbacks() {
+            return {
+                title: function(tooltipItems) {
+                    const item = tooltipItems[0];
+                    let label = item.chart.data.labels[item.dataIndex];
+                    if (Array.isArray(label)) {
+                        return label.join(' ');
+                    } else {
+                        return label;
+                    }
+                }
+            };
+        }
+
+        window.onload = function () {
+            const defaultChartOptions = (textColor) => ({
+                maintainAspectRatio: false,
+                responsive: true,
+                plugins: {
+                    legend: {
+                        labels: {
+                            color: textColor
+                        }
+                    },
+                    tooltip: getTooltipCallbacks()
+                }
+            });
+
+            const ctxTraditional = document.getElementById('traditionalChart')?.getContext('2d');
+            if (ctxTraditional) {
+                new Chart(ctxTraditional, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Public Data (Balance, PnL, Entry)'],
+                        datasets: [{
+                            data: [100],
+                            backgroundColor: [chartColors.red],
+                            borderColor: [chartColors.darkGray],
+                            borderWidth: 3
+                        }]
+                    },
+                    options: {
+                        ...defaultChartOptions(chartColors.gray),
+                        cutout: '70%',
+                    }
+                });
+            }
+
+            const ctxSeismic = document.getElementById('seismicChart')?.getContext('2d');
+            if (ctxSeismic) {
+                new Chart(ctxSeismic, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Public Data (Status, Asset)', 'Private Data (Balance, PnL, Entry)'],
+                        datasets: [{
+                            data: [20, 80],
+                            backgroundColor: [chartColors.cyan, chartColors.purple],
+                            borderColor: [chartColors.darkGray],
+                            borderWidth: 3
+                        }]
+                    },
+                    options: {
+                        ...defaultChartOptions(chartColors.gray),
+                        cutout: '70%',
+                    }
+                });
+            }
+
+            const ctxRadar = document.getElementById('componentRadarChart')?.getContext('2d');
+            if (ctxRadar) {
+                const radarLabels = [
+                    'Heavy Computation', 
+                    'Secure Data Storage', 
+                    'Data Privacy', 
+                    'Real-time Speed', 
+                    'Trustless Verification'
+                ];
+                
+                new Chart(ctxRadar, {
+                    type: 'radar',
+                    data: {
+                        labels: wrapLabels(radarLabels),
+                        datasets: [
+                            {
+                                label: 'Off-Chain Engine (Brain)',
+                                data: [10, 3, 2, 10, 2],
+                                backgroundColor: 'rgba(34, 211, 238, 0.2)',
+                                borderColor: chartColors.cyan,
+                                pointBackgroundColor: chartColors.cyan,
+                                pointBorderColor: '#fff',
+                                pointHoverBackgroundColor: '#fff',
+                                pointHoverBorderColor: chartColors.cyan
+                            },
+                            {
+                                label: 'On-Chain CSC (Wallet)',
+                                data: [6, 10, 10, 7, 10],
+                                backgroundColor: 'rgba(167, 139, 250, 0.2)',
+                                borderColor: chartColors.purple,
+                                pointBackgroundColor: chartColors.purple,
+                                pointBorderColor: '#fff',
+                                pointHoverBackgroundColor: '#fff',
+                                pointHoverBorderColor: chartColors.purple
+                            }
+                        ]
+                    },
+                    options: {
+                        ...defaultChartOptions(chartColors.gray),
+                        scales: {
+                            r: {
+                                angleLines: { color: 'rgba(255, 255, 255, 0.2)' },
+                                grid: { color: 'rgba(255, 255, 255, 0.2)' },
+                                pointLabels: { 
+                                    color: chartColors.gray,
+                                    font: {
+                                        size: 11
+                                    }
+                                },
+                                ticks: {
+                                    color: chartColors.gray,
+                                    backdropColor: 'rgba(0, 0, 0, 0.5)',
+                                    backdropPadding: 4,
+                                    stepSize: 2
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        };
+    </script>
+</body>
+</html>
