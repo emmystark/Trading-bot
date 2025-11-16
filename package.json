@@ -1,0 +1,22 @@
+{
+  "name": "seismic-trading-bot",
+  "private": true,
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "lint": "turbo lint",
+    "clean": "turbo clean"
+  },
+  "devDependencies": {
+    "@turbo/gen": "^1.10.0",
+    "turbo": "^1.10.0",
+    "typescript": "^5.0.0"
+  },
+  "packageManager": "npm@8.0.0",
+  "workspaces": [
+    "frontend",
+    "backend",
+    "shared",
+    "contracts"
+  ]
+}
