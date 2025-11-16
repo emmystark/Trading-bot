@@ -78,10 +78,9 @@ async function getMockContract() {
 // Market analysis (unchanged, but with error handling)
 async function analyzeMarket() {
   try {
-    // const { data: prices } = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true');
-    const { data } = await fetchWithTimeout(url, {}, 8000);
-
-
+    const { data: prices } = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true');
+    const { data: news } = await axios.get(`https://newsapi.org/v2/everything?q=crypto&apiKey=${process.env.NEWS_API_KEY || ''}&sortBy=publishedAt&pageSize=5`);
+    
     const positiveWords = ['surge', 'rally', 'bullish', 'gain'];
     const sentiment = news.articles.reduce((score, article) => {
       const text = article.title + ' ' + article.description;
