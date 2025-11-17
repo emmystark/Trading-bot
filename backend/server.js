@@ -26,19 +26,62 @@ function decryptData(encrypted, key = process.env.ENCRYPTION_KEY) {
 }
 
 // Init provider & wallet (async, with error handling)
-async function initBlockchain() {
+async function initBlockchain(retries = 3) {
+  const rpcUrl = process.env.SEISMIC_RPC?.trim();
+  if (!rpcUrl || rpcUrl === 'https://internal-testnet.seismictest.net/rpc') {
+    console.log('⚠️ Seismic RPC invalid/down — testing connection...');
+  }
+
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      // Create provider with timeout
+      const provider = new ethers.JsonRpcProvider(rpcUrl, undefined, {
+        timeout: 10000,  // 10s timeout
+        pollingInterval: 4000,
+      });
+
+      // Test connection: Get chain ID
+      const chainId = await provider.getNetwork().then(net => net.chainId);
+      console.log(`✅ Connected to chain ${chainId} (${rpcUrl})`);
+
+      wallet = generateWallet(process.env.PRIVATE_KEY || 'random');
+      wallet = wallet.connect(provider);
+      await wallet.getAddress();  // Final test
+
+      console.log('✅ Wallet ready:', wallet.address);
+      console.log('🔗 Provider URL:', provider.connection.url || rpcUrl);  // Safe access
+      return true;
+    } catch (error) {
+      console.error(`❌ Attempt ${attempt}/${retries} failed:`, error.message);
+      if (attempt === retries) {
+        console.log('🔄 All retries failed — falling back to Sepolia testnet');
+        // Auto-fallback to working Sepolia
+        return await initBlockchainWithFallback();
+      }
+      await new Promise(resolve => setTimeout(resolve, 2000));  // 2s delay
+    }
+  }
+  return false;
+}
+
+// Fallback function (add this below initBlockchain)
+async function initBlockchainWithFallback() {
   try {
-    provider = new ethers.JsonRpcProvider(process.env.SEISMIC_RPC || 'http://localhost:8545'); // Fallback to Hardhat if no RPC
+    const fallbackUrl = 'https://sepolia.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161';
+    const provider = new ethers.JsonRpcProvider(fallbackUrl);
+    const chainId = await provider.getNetwork().then(net => net.chainId);
+    console.log(`✅ Fallback connected to Sepolia (chain ${chainId})`);
+
     wallet = generateWallet(process.env.PRIVATE_KEY || 'random');
     wallet = wallet.connect(provider);
-    await wallet.getAddress(); // Test connection
-    console.log('✅ Wallet ready:', wallet.address);
-    console.log('🔗 Provider:', provider.connection.url);
+    await wallet.getAddress();
+
+    console.log('✅ Wallet ready (fallback):', wallet.address);
+    console.log('🔗 Fallback Provider:', fallbackUrl);
     return true;
   } catch (error) {
-    console.error('❌ Blockchain init failed:', error.message);
-    console.log('🔄 Falling back to MOCK mode (no real RPC)');
-    return false; // Use mocks
+    console.error('❌ Even fallback failed:', error.message);
+    return false;
   }
 }
 
@@ -46,7 +89,7 @@ async function initBlockchain() {
 async function getMockContract() {
   if (mockContract) return mockContract;
 
-  const isConnected = await initBlockchain(); // Ensure ready
+  const isConnected = await initBlockchain();  // Uses retries + fallback
   const mockAddress = ethers.ZeroAddress; // Valid: 0x0000000000000000000000000000000000000000 – no ENS resolution
   const mockTradeABI = [
     'function enterTrade(address asset, uint amount) external',
