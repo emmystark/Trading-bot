@@ -1,255 +1,463 @@
-require('dotenv').config();
+// backend/server.js - FREE VERSION with Rate Limit Handling
 const express = require('express');
 const cors = require('cors');
-const cron = require('node-cron');
 const axios = require('axios');
 const { ethers } = require('ethers');
-const CryptoJS = require('crypto-js');
-const { generateWallet } = require('../shared/utils');
+require('dotenv').config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT || 3001;
-let provider;
-let wallet;
-let mockContract = null; // Lazy init
+// Cache for API responses
+const cache = new Map();
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
-// Encryption util for privacy
-function encryptData(data, key = process.env.ENCRYPTION_KEY) {
-  return CryptoJS.AES.encrypt(JSON.stringify(data), key).toString();
-}
-function decryptData(encrypted, key = process.env.ENCRYPTION_KEY) {
-  const bytes = CryptoJS.AES.decrypt(encrypted, key);
-  return JSON.parse(bytes.toString(CryptoJS.enc.Utf8));
-}
+// Rate limiting tracker
+let lastAPICall = 0;
+const MIN_API_INTERVAL = 10000; // 10 seconds between calls
 
-// Init provider & wallet (async, with error handling)
-async function initBlockchain(retries = 3) {
-  const rpcUrl = process.env.SEISMIC_RPC?.trim();
-  if (!rpcUrl || rpcUrl === 'https://internal-testnet.seismictest.net/rpc') {
-    console.log('⚠️ Seismic RPC invalid/down — testing connection...');
-  }
+// Trading bot state
+let botState = {
+  isActive: false,
+  lastTradeTime: null,
+  dailyTradeCount: 0,
+  currentPositions: [],
+  tradingHistory: []
+};
 
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      // Create provider with timeout
-      const provider = new ethers.JsonRpcProvider(rpcUrl, undefined, {
-        timeout: 10000,  // 10s timeout
-        pollingInterval: 4000,
-      });
-
-      // Test connection: Get chain ID
-      const chainId = await provider.getNetwork().then(net => net.chainId);
-      console.log(`✅ Connected to chain ${chainId} (${rpcUrl})`);
-
-      wallet = generateWallet(process.env.PRIVATE_KEY || 'random');
-      wallet = wallet.connect(provider);
-      await wallet.getAddress();  // Final test
-
-      console.log('✅ Wallet ready:', wallet.address);
-      console.log('🔗 Provider URL:', provider.connection.url || rpcUrl);  // Safe access
-      return true;
-    } catch (error) {
-      console.error(`❌ Attempt ${attempt}/${retries} failed:`, error.message);
-      if (attempt === retries) {
-        console.log('🔄 All retries failed — falling back to Sepolia testnet');
-        // Auto-fallback to working Sepolia
-        return await initBlockchainWithFallback();
+// Mock data for when APIs are rate limited
+const MOCK_DATA = {
+  coins: [
+    {
+      id: 'bitcoin',
+      symbol: 'BTC',
+      name: 'Bitcoin',
+      current_price: 61234,
+      price_change_percentage_24h: 2.34,
+      market_cap: 1200000000000,
+      total_volume: 28000000000,
+      sparkline_in_7d: {
+        price: Array.from({length: 168}, (_, i) => 60000 + Math.sin(i / 20) * 2000 + Math.random() * 500)
       }
-      await new Promise(resolve => setTimeout(resolve, 2000));  // 2s delay
+    },
+    {
+      id: 'ethereum',
+      symbol: 'ETH',
+      name: 'Ethereum',
+      current_price: 3245,
+      price_change_percentage_24h: 1.87,
+      market_cap: 390000000000,
+      total_volume: 15000000000,
+      sparkline_in_7d: {
+        price: Array.from({length: 168}, (_, i) => 3200 + Math.sin(i / 15) * 100 + Math.random() * 50)
+      }
+    },
+    {
+      id: 'solana',
+      symbol: 'SOL',
+      name: 'Solana',
+      current_price: 98.5,
+      price_change_percentage_24h: 3.21,
+      market_cap: 44000000000,
+      total_volume: 2000000000,
+      sparkline_in_7d: {
+        price: Array.from({length: 168}, (_, i) => 95 + Math.sin(i / 10) * 5 + Math.random() * 2)
+      }
     }
-  }
-  return false;
-}
+  ],
+  news: [
+    { title: 'Bitcoin institutional adoption reaches new heights in 2025' },
+    { title: 'Ethereum scaling solutions show promising results' },
+    { title: 'DeFi protocols report record trading volumes' },
+    { title: 'Crypto market sentiment remains cautiously optimistic' }
+  ]
+};
 
-// Fallback function (add this below initBlockchain)
-async function initBlockchainWithFallback() {
+// FREE AI Analysis using technical indicators only
+function analyzeMarketFree(coinData, newsData, historicalData) {
   try {
-    const fallbackUrl = 'https://sepolia.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161';
-    const provider = new ethers.JsonRpcProvider(fallbackUrl);
-    const chainId = await provider.getNetwork().then(net => net.chainId);
-    console.log(`✅ Fallback connected to Sepolia (chain ${chainId})`);
-
-    wallet = generateWallet(process.env.PRIVATE_KEY || 'random');
-    wallet = wallet.connect(provider);
-    await wallet.getAddress();
-
-    console.log('✅ Wallet ready (fallback):', wallet.address);
-    console.log('🔗 Fallback Provider:', fallbackUrl);
-    return true;
-  } catch (error) {
-    console.error('❌ Even fallback failed:', error.message);
-    return false;
-  }
-}
-
-// Lazy contract init (only when needed, with valid address)
-async function getMockContract() {
-  if (mockContract) return mockContract;
-
-  const isConnected = await initBlockchain();  // Uses retries + fallback
-  const mockAddress = ethers.ZeroAddress; // Valid: 0x0000000000000000000000000000000000000000 – no ENS resolution
-  const mockTradeABI = [
-    'function enterTrade(address asset, uint amount) external',
-    'function exitTrade(address asset) external',
-    'function getBalance() view returns (uint)'
-  ];
-
-  if (isConnected) {
-    try {
-      mockContract = new ethers.Contract(mockAddress, mockTradeABI, wallet);
-      console.log('📄 Mock contract connected');
-      return mockContract;
-    } catch (error) {
-      console.error('⚠️ Contract connect failed:', error.message);
-      console.log('🔄 Using full MOCK mode');
-    }
-  }
-
-  // Full mock fallback (no blockchain)
-  mockContract = {
-    enterTrade: async (asset, amount) => ({ hash: '0xmock' + Math.random().toString(16), success: true }),
-    exitTrade: async (asset) => ({ hash: '0xmock-exit', success: true, pnl: Math.random() * 5 }),
-    getBalance: async () => ethers.parseEther('1.0') // Mock 1 ETH
-  };
-  console.log('🎭 Full mock contract active');
-  return mockContract;
-}
-
-// Market analysis (unchanged, but with error handling)
-async function analyzeMarket() {
-  try {
-    const { data: prices } = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true');
-    const { data: news } = await axios.get(`https://newsapi.org/v2/everything?q=crypto&apiKey=${process.env.NEWS_API_KEY || ''}&sortBy=publishedAt&pageSize=5`);
+    const technicals = calculateIndicators(historicalData);
+    const sentiment = analyzeNewsSentiment(newsData);
+    const momentum = calculateMomentum(coinData);
     
-    const positiveWords = ['surge', 'rally', 'bullish', 'gain'];
-    const sentiment = news.articles.reduce((score, article) => {
-      const text = article.title + ' ' + article.description;
-      const posCount = positiveWords.filter(word => text.toLowerCase().includes(word)).length;
-      return score + (posCount > 0 ? 0.5 : -0.2);
-    }, 0) / news.articles.length;
-
-    const btcChange = prices.bitcoin.usd_24h_change;
-    const signal = (btcChange > 1 && sentiment > 0.3) ? 'Buy' : 'Hold';
-
-    return { prices, news, sentiment: Math.round(sentiment * 10) / 10, signal };
+    let confidence = 0.5;
+    let signal = 'HOLD';
+    
+    // RSI signals (30% weight)
+    if (technicals.rsi < 30) {
+      confidence += 0.25;
+      signal = 'BUY';
+    } else if (technicals.rsi > 70) {
+      confidence += 0.15;
+      signal = 'SELL';
+    } else if (technicals.rsi >= 40 && technicals.rsi <= 60) {
+      confidence += 0.1;
+    }
+    
+    // Moving average crossover (25% weight)
+    if (technicals.sma20 > technicals.sma50) {
+      confidence += 0.2;
+      if (signal !== 'SELL') signal = 'BUY';
+    }
+    
+    // MACD signals (20% weight)
+    if (technicals.macd > 0 && technicals.signal > 0) {
+      confidence += 0.15;
+      if (signal !== 'SELL') signal = 'BUY';
+    }
+    
+    // Sentiment (15% weight)
+    if (sentiment.score > 0.6) {
+      confidence += 0.1;
+    }
+    
+    // Momentum (10% weight)
+    if (momentum > 0) {
+      confidence += 0.1;
+    }
+    
+    const positionSize = Math.min(0.3, confidence * 0.4);
+    const stopLoss = technicals.rsi < 40 ? -0.05 : -0.07;
+    const takeProfit = confidence > 0.7 ? 0.12 : 0.08;
+    const reasoning = generateReasoning(technicals, sentiment, momentum, signal);
+    
+    return {
+      signal,
+      confidence: Math.min(confidence, 1.0),
+      positionSize,
+      stopLoss,
+      takeProfit,
+      reasoning,
+      technicals
+    };
   } catch (error) {
-    console.error('Analysis error:', error.message);
-    return { error: 'Failed to analyze', signal: 'Hold' };
+    console.error('Free AI Analysis Error:', error);
+    return {
+      signal: 'HOLD',
+      confidence: 0.5,
+      positionSize: 0,
+      reasoning: 'Error in analysis, defaulting to HOLD'
+    };
   }
 }
 
-// Enter trade (now async-safe)
-async function enterTrade(asset = 'bitcoin', amount = ethers.parseEther('0.01')) {
-  try {
-    const contract = await getMockContract();
-    const assetAddr = ethers.ZeroAddress; // Mock asset address
-    const tx = await contract.enterTrade(assetAddr, amount);
-    const entryPrice = await getCurrentPrice(asset);
-    const encryptedEntry = encryptData({ price: entryPrice, time: Date.now() });
-    console.log('✅ Entered trade:', tx.hash || 'mock');
-    return { success: true, txHash: tx.hash || '0xmock', entry: encryptedEntry };
-  } catch (error) {
-    console.error('Trade entry error:', error.message);
-    return { success: false, error: error.message };
-  }
-}
-
-// Exit on profit (now async-safe)
-async function checkAndExitTrades() {
-  try {
-    const contract = await getMockContract();
-    const assetAddr = ethers.ZeroAddress;
-    const tx = await contract.exitTrade(assetAddr);
-    const pnl = tx.pnl || (Math.random() > 0.5 ? 3.2 : -1.1); // Mock profit
-    console.log('✅ Exited trade:', tx.hash || 'mock', `P&L: ${pnl}%`);
-    return { success: true, pnl };
-  } catch (error) {
-    console.error('Exit error:', error.message);
-    return { success: false };
-  }
-}
-
-async function getCurrentPrice(asset) {
-  try {
-    const { data } = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${asset}&vs_currencies=usd`);
-    return data[asset].usd;
-  } catch (error) {
-    return 60000; // Mock BTC price
-  }
-}
-
-async function getBalance() {
-  try {
-    const contract = await getMockContract();
-    const bal = await contract.getBalance();
-    const encryptedBal = encryptData({ wei: bal.toString() });
-    return { balance: ethers.formatEther(bal) };
-  } catch (error) {
-    return { balance: '1.0' }; // Mock
-  }
-}
-
-// Health check route
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString(), blockchainReady: !!provider });
-});
-
-// API Routes (async-safe)
-app.get('/api/market', async (req, res) => {
-    try {
-      const analysis = await analyzeMarket();
-      
-      // ALWAYS return chartData, even in mock
-      const chartData = Array.from({ length: 24 }, (_, i) => ({
-        time: `${String(i).padStart(2, '0')}:00`,
-        price: 60000 + Math.random() * 2000 + i * 50
-      }));
+function generateReasoning(technicals, sentiment, momentum, signal) {
+  const reasons = [];
   
-      res.json({ 
-        ...analysis, 
-        chartData // ← This must be here
-      });
-    } catch (error) {
-      res.status(500).json({ 
-        error: 'Market data failed', 
-        chartData: [],
-        signal: 'Hold'
-      });
-    }
-  });
-
-app.get('/api/trades', async (req, res) => {
-  // Mock trades (add real DB later)
-  res.json([
-    { id: '001', asset: 'BTC', entry: '$60,000', exit: null, pnl: 1.2, status: 'Active' },
-    { id: '002', asset: 'ETH', entry: '$3,000', exit: '$3,090', pnl: 3, status: 'Closed' }
-  ]);
-});
-
-app.get('/api/balance', getBalance);
-
-// Start server & cron (wait for blockchain)
-async function startApp() {
-  await initBlockchain(); // Early init
-
-  // Cron: Only after ready
-  cron.schedule('*/15 * * * *', async () => {
-    const analysis = await analyzeMarket();
-    if (analysis.signal === 'Buy') {
-      await enterTrade();
-    }
-    console.log('📊 Analysis:', analysis);
-  });
-
-  cron.schedule('*/5 * * * *', checkAndExitTrades);
-
-  app.listen(PORT, () => {
-    console.log(`🚀 Backend running on http://localhost:${PORT}`);
-    console.log(`📡 Health: http://localhost:${PORT}/health`);
-  });
+  if (technicals.rsi < 35) {
+    reasons.push('Oversold conditions detected (RSI: ' + technicals.rsi.toFixed(1) + ')');
+  } else if (technicals.rsi > 65) {
+    reasons.push('Overbought conditions detected (RSI: ' + technicals.rsi.toFixed(1) + ')');
+  }
+  
+  if (technicals.sma20 > technicals.sma50) {
+    reasons.push('Bullish trend confirmed by moving averages');
+  } else if (technicals.sma20 < technicals.sma50) {
+    reasons.push('Bearish trend indicated by moving averages');
+  }
+  
+  if (technicals.macd > 0) {
+    reasons.push('Positive MACD momentum');
+  }
+  
+  if (sentiment.score > 0.6) {
+    reasons.push('Positive market sentiment');
+  } else if (sentiment.score < 0.4) {
+    reasons.push('Negative market sentiment');
+  }
+  
+  if (momentum > 3) {
+    reasons.push('Strong upward price momentum (+' + momentum.toFixed(1) + '%)');
+  } else if (momentum < -3) {
+    reasons.push('Strong downward momentum (' + momentum.toFixed(1) + '%)');
+  }
+  
+  return reasons.length > 0 
+    ? `${signal}: ${reasons.join('. ')}`
+    : `${signal} signal based on neutral market conditions`;
 }
 
-startApp().catch(console.error);
+function analyzeNewsSentiment(newsData) {
+  const positiveWords = ['bullish', 'surge', 'rally', 'breakthrough', 'adoption', 
+                         'partnership', 'growth', 'gain', 'up', 'rise', 'positive', 'institutional'];
+  const negativeWords = ['crash', 'bearish', 'decline', 'concern', 'regulatory', 
+                         'hack', 'fall', 'down', 'negative', 'risk', 'fear', 'ban'];
+  
+  let score = 0.5;
+  let newsCount = 0;
+  
+  newsData.forEach(article => {
+    const text = article.title.toLowerCase();
+    newsCount++;
+    
+    positiveWords.forEach(word => {
+      if (text.includes(word)) score += 0.02;
+    });
+    
+    negativeWords.forEach(word => {
+      if (text.includes(word)) score -= 0.02;
+    });
+  });
+  
+  return {
+    score: Math.max(0, Math.min(1, score)),
+    newsCount
+  };
+}
+
+function calculateMomentum(coinData) {
+  return coinData.price_change_percentage_24h || 0;
+}
+
+// Cached API call wrapper
+async function cachedFetch(key, fetchFunction, duration = CACHE_DURATION) {
+  const now = Date.now();
+  
+  // Check cache first
+  if (cache.has(key)) {
+    const cached = cache.get(key);
+    if (now - cached.timestamp < duration) {
+      console.log(`Using cached data for: ${key}`);
+      return cached.data;
+    }
+  }
+  
+  // Rate limiting
+  const timeSinceLastCall = now - lastAPICall;
+  if (timeSinceLastCall < MIN_API_INTERVAL) {
+    const waitTime = MIN_API_INTERVAL - timeSinceLastCall;
+    console.log(`Rate limiting: waiting ${waitTime}ms before API call`);
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+  }
+  
+  try {
+    lastAPICall = Date.now();
+    const data = await fetchFunction();
+    cache.set(key, { data, timestamp: Date.now() });
+    return data;
+  } catch (error) {
+    console.error(`API call failed for ${key}:`, error.message);
+    
+    // Return cached data even if expired, or mock data
+    if (cache.has(key)) {
+      console.log(`Using expired cache for: ${key}`);
+      return cache.get(key).data;
+    }
+    
+    throw error;
+  }
+}
+
+// Fetch Market Data with caching and fallback
+async function fetchMarketData() {
+  try {
+    const data = await cachedFetch('market_data', async () => {
+      try {
+        // Try CoinGecko
+        const priceData = await axios.get('https://api.coingecko.com/api/v3/coins/markets', {
+          params: {
+            vs_currency: 'usd',
+            order: 'market_cap_desc',
+            per_page: 20,
+            sparkline: true
+          },
+          timeout: 5000
+        });
+
+        return {
+          coins: priceData.data,
+          news: MOCK_DATA.news // Use mock news for now
+        };
+      } catch (error) {
+        if (error.response?.status === 429) {
+          console.log('⚠️ CoinGecko rate limit hit - using cached/mock data');
+        }
+        throw error;
+      }
+    }, 60000); // Cache for 1 minute
+
+    return data;
+  } catch (error) {
+    console.log(' Using mock market data (API unavailable)');
+    return MOCK_DATA;
+  }
+}
+
+// Calculate Technical Indicators
+function calculateIndicators(priceHistory) {
+  const prices = priceHistory.map(p => typeof p === 'number' ? p : p.price);
+  
+  if (prices.length < 50) {
+    const lastPrice = prices[prices.length - 1] || 50000;
+    return { 
+      rsi: 50, 
+      sma20: lastPrice, 
+      sma50: lastPrice, 
+      macd: 0, 
+      signal: 0 
+    };
+  }
+  
+  // RSI
+  const gains = [];
+  const losses = [];
+  for (let i = 1; i < prices.length; i++) {
+    const diff = prices[i] - prices[i - 1];
+    gains.push(diff > 0 ? diff : 0);
+    losses.push(diff < 0 ? Math.abs(diff) : 0);
+  }
+  
+  const avgGain = gains.slice(-14).reduce((a, b) => a + b, 0) / 14;
+  const avgLoss = losses.slice(-14).reduce((a, b) => a + b, 0) / 14;
+  const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+  const rsi = 100 - (100 / (1 + rs));
+  
+  // Moving Averages
+  const sma20 = prices.slice(-20).reduce((a, b) => a + b, 0) / 20;
+  const sma50 = prices.slice(-50).reduce((a, b) => a + b, 0) / 50;
+  
+  // Simple MACD
+  const ema12 = calculateEMA(prices, 12);
+  const ema26 = calculateEMA(prices, 26);
+  const macd = ema12 - ema26;
+  const signal = calculateEMA([macd], 9);
+  
+  return { rsi, sma20, sma50, macd, signal };
+}
+
+function calculateEMA(prices, period) {
+  if (prices.length < period) return prices[prices.length - 1];
+  
+  const multiplier = 2 / (period + 1);
+  let ema = prices.slice(-period).reduce((a, b) => a + b, 0) / period;
+  
+  for (let i = prices.length - period; i < prices.length; i++) {
+    ema = (prices[i] - ema) * multiplier + ema;
+  }
+  
+  return ema;
+}
+
+// Find Best Trading Opportunity
+async function findBestTradingOpportunity() {
+  const marketData = await fetchMarketData();
+  const opportunities = [];
+  
+  for (const coin of marketData.coins.slice(0, 10)) {
+    const analysis = analyzeMarketFree(
+      coin,
+      marketData.news.filter(n => 
+        n.title.toLowerCase().includes(coin.symbol.toLowerCase())
+      ),
+      coin.sparkline_in_7d?.price || []
+    );
+    
+    opportunities.push({
+      coin,
+      analysis,
+      score: analysis.confidence
+    });
+  }
+  
+  return opportunities.sort((a, b) => b.score - a.score)[0];
+}
+
+// API Endpoints
+app.get('/api/trades', (req, res) => {
+  res.json(botState.tradingHistory.slice(-20));
+});
+
+app.get('/api/balance', async (req, res) => {
+  try {
+    // For demo, return mock balance
+    // In production, query smart contract
+    res.json({ balance: '1.2547' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/market', async (req, res) => {
+  try {
+    const marketData = await fetchMarketData();
+    const opportunity = await findBestTradingOpportunity();
+    
+    res.json({
+      chartData: opportunity.coin.sparkline_in_7d?.price.slice(-24).map((price, i) => ({
+        time: `${i}h`,
+        price: price
+      })) || [],
+      signal: opportunity.analysis.signal,
+      sentiment: opportunity.analysis.confidence,
+      reasoning: opportunity.analysis.reasoning,
+      prices: {
+        bitcoin: {
+          usd: opportunity.coin.current_price,
+          usd_24h_change: opportunity.coin.price_change_percentage_24h || 0
+        }
+      },
+      news: { 
+        articles: marketData.news.slice(0, 4).map(n => ({ title: n.title }))
+      }
+    });
+  } catch (error) {
+    console.error('Market API error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/bot/start', async (req, res) => {
+  const { userAddress, privateKey } = req.body;
+  
+  if (botState.isActive) {
+    return res.json({ success: false, message: 'Bot is already running' });
+  }
+  
+  botState.isActive = true;
+  
+  // Don't start interval in demo mode
+  console.log(' Bot started (demo mode)');
+  
+  res.json({ 
+    success: true, 
+    message: 'Trading bot started with free AI analysis' 
+  });
+});
+
+app.post('/api/bot/stop', (req, res) => {
+  botState.isActive = false;
+  console.log(' Bot stopped');
+  res.json({ success: true, message: 'Trading bot stopped' });
+});
+
+app.get('/api/bot/status', (req, res) => {
+  res.json({
+    isActive: botState.isActive,
+    dailyTradeCount: botState.dailyTradeCount,
+    activePositions: botState.currentPositions.length,
+    lastTradeTime: botState.lastTradeTime,
+    aiType: 'Free Technical Analysis'
+  });
+});
+
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    uptime: process.uptime(),
+    cacheSize: cache.size,
+    botActive: botState.isActive
+  });
+});
+
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => {
+  console.log(` Seismic Trading Bot (FREE) running on port ${PORT}`);
+  console.log(` Using 100% free tools - no API costs!`);
+  console.log(` Rate limiting enabled: ${MIN_API_INTERVAL}ms between API calls`);
+  console.log(` Caching enabled: ${CACHE_DURATION / 1000}s cache duration`);
+  console.log(` Access dashboard at: http://localhost:${PORT}`);
+});
+
+module.exports = app;

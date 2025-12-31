@@ -9,6 +9,20 @@ interface Trade {
   exit: string | null
   pnl: number
   status: 'Active' | 'Closed'
+  timestamp?: string
+}
+
+interface MarketData {
+  chartData: Array<{time: string, price: number}>
+  signal: string
+  sentiment: number
+  prices: {
+    bitcoin: {
+      usd: number
+      usd_24h_change: number
+    }
+  }
+  // Removed news field, as it's now fetched separately
 }
 
 export default function Dashboard() {
@@ -19,53 +33,156 @@ export default function Dashboard() {
   const [btcPrice, setBtcPrice] = useState<number>(0)
   const [btcChange, setBtcChange] = useState<number>(0)
   const [sentiment, setSentiment] = useState<number>(0)
-  const [news, setNews] = useState<string[]>([])
+  // Updated news state to array of objects for title and link
+  const [news, setNews] = useState<{title: string, link: string}[]>([])
   const [loading, setLoading] = useState<boolean>(true)
   const [refreshing, setRefreshing] = useState<boolean>(false)
+  const [error, setError] = useState<string>('')
+  const [botStatus, setBotStatus] = useState({
+    isActive: false,
+    dailyTradeCount: 0,
+    activePositions: 0,
+    aiType: 'Free Technical Analysis'
+  })
+
+  // Backend URL - change this if deployed elsewhere
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
 
   const fetchData = async () => {
     try {
       setRefreshing(true)
-      await new Promise(resolve => setTimeout(resolve, 800))
-      
-      const mockChartData = Array.from({length: 24}, (_, i) => ({ 
-        time: `${i}:00`, 
-        price: 60000 + Math.sin(i / 3) * 2000 + Math.random() * 500 
-      }))
-      
-      const mockTrades = [
-        { id: 'T001', asset: 'BTC/USDT', entry: '60,250', exit: '61,500', pnl: 2.07, status: 'Closed' as const },
-        { id: 'T002', asset: 'ETH/USDT', entry: '3,200', exit: null, pnl: 1.25, status: 'Active' as const },
-        { id: 'T003', asset: 'BTC/USDT', entry: '59,800', exit: '60,100', pnl: 0.50, status: 'Closed' as const },
-      ]
-      
-      const mockNews = [
-        'Bitcoin breaks resistance at $61K amid institutional buying',
-        'Ethereum Layer 2 solutions see record adoption',
-        'Federal Reserve signals potential rate cuts in Q2',
-        'Major crypto exchange announces new trading pairs'
-      ]
-      
-      setTrades(mockTrades)
-      setChartData(mockChartData)
-      setSignal(['Buy', 'Sell', 'Hold'][Math.floor(Math.random() * 3)])
-      setSentiment(0.65 + Math.random() * 0.2)
+      setError('')
+      console.log('Fetching data from:', API_URL)
+
+      // Added newsRes to Promise.all for parallel fetching from CryptoCompare API
+      const [tradesRes, marketRes, botStatusRes, newsRes] = await Promise.all([
+        fetch(`${API_URL}/api/trades`).catch(e => {
+          console.error('Trades API error:', e)
+          return { ok: false, json: async () => [] }
+        }),
+        fetch(`${API_URL}/api/market`).catch(e => {
+          console.error('Market API error:', e)
+          return { ok: false, json: async () => null }
+        }),
+        fetch(`${API_URL}/api/bot/status`).catch(e => {
+          console.error('Status API error:', e)
+          return { ok: false, json: async () => null }
+        }),
+        // New: Fetch latest crypto news from CryptoCompare API (filtered for relevance)
+        fetch('https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories=Market,Blockchain,BTC,ETH').catch(e => {
+          console.error('Crypto news API error:', e)
+          return { ok: false, json: async () => ({ Data: [] }) }
+        })
+      ])
+
+      // Process trades
+      if (tradesRes.ok) {
+        const tradesData = await tradesRes.json()
+        setTrades(Array.isArray(tradesData) ? tradesData : [])
+        console.log('Trades loaded:', tradesData.length)
+      }
+
+      // Process market data (removed news handling)
+      if (marketRes.ok) {
+        const marketData: MarketData = await marketRes.json()
+        setChartData(marketData.chartData || [])
+        setSignal(marketData.signal || 'Hold')
+        setSentiment(marketData.sentiment || 0.5)
+        setBtcPrice(marketData.prices?.bitcoin?.usd || 0)
+        setBtcChange(marketData.prices?.bitcoin?.usd_24h_change || 0)
+        console.log('Market data loaded:', {
+          signal: marketData.signal,
+          price: marketData.prices?.bitcoin?.usd
+        })
+      }
+
+      // Process bot status
+      if (botStatusRes.ok) {
+        const statusData = await botStatusRes.json()
+        setBotStatus(statusData)
+        console.log('Bot status:', statusData)
+      }
+
+      // New: Process crypto news
+      if (newsRes.ok) {
+        const newsData = await newsRes.json()
+        setNews(newsData.Data.slice(0, 4).map((article: any) => ({
+          title: article.title,
+          link: article.url
+        })))
+        console.log('Crypto news loaded:', newsData.Data.length)
+      }
+
+      // Mock balance for demo (replace with actual contract call)
+      setBalance('1.2547')
+      console.log('All data loaded successfully!')
+    } catch (err) {
+      console.error('Fetch error:', err)
+      setError('Failed to connect to backend. Make sure the server is running on port 3001.')
+      // Load mock data so UI isn't empty
+      setChartData(Array.from({length: 24}, (_, i) => ({
+        time: `${i}:00`,
+        price: 60000 + i * 50 + Math.random() * 200
+      })))
+      setSignal('Hold')
+      setBalance('1.547')
       setBtcPrice(61234)
       setBtcChange(2.34)
-      setNews(mockNews)
-      setBalance('12.5847')
-      
-    } catch (err) {
-      console.error('Error fetching data:', err)
+      setSentiment(0.65)
+      // Updated mock news to include links
+      setNews([
+        { title: 'Bitcoin shows strong momentum as institutional adoption grows', link: 'https://example.com/news1' },
+        { title: 'Ethereum Layer 2 solutions reach new all-time high in usage', link: 'https://example.com/news2' },
+        { title: 'Market sentiment remains bullish despite regulatory concerns', link: 'https://example.com/news3' },
+        { title: 'DeFi protocols see record trading volumes this week', link: 'https://example.com/news4' }
+      ])
     } finally {
       setLoading(false)
       setRefreshing(false)
     }
   }
 
+  const startBot = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/bot/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userAddress: '0xYourAddress', // Replace with actual user address
+          privateKey: process.env.NEXT_PUBLIC_BOT_PRIVATE_KEY // For demo only
+        })
+      })
+      if (response.ok) {
+        const data = await response.json()
+        alert(data.message)
+        fetchData() // Refresh status
+      }
+    } catch (err) {
+      console.error('Start bot error:', err)
+      alert('Failed to start bot. Check backend connection.')
+    }
+  }
+
+  const stopBot = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/bot/stop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      })
+      if (response.ok) {
+        const data = await response.json()
+        alert(data.message)
+        fetchData() // Refresh status
+      }
+    } catch (err) {
+      console.error('Stop bot error:', err)
+      alert('Failed to stop bot. Check backend connection.')
+    }
+  }
+
   useEffect(() => {
     fetchData()
-    const interval = setInterval(fetchData, 30000)
+    const interval = setInterval(fetchData, 30000) // Refresh every 30 seconds
     return () => clearInterval(interval)
   }, [])
 
@@ -84,7 +201,8 @@ export default function Dashboard() {
             </svg>
           </div>
           <h2 style={styles.loadingTitle}>Seismic AI</h2>
-          <p style={styles.loadingText}>Initializing trading intelligence...</p>
+          <p style={styles.loadingText}>Loading market data...</p>
+          {error && <p style={{...styles.loadingText, color: '#fca5a5'}}>{error}</p>}
         </div>
       </div>
     )
@@ -94,43 +212,67 @@ export default function Dashboard() {
     <div style={styles.pageWrapper}>
       <style>{cssStyles}</style>
       <div style={styles.container}>
+        {/* Error Banner */}
+        {error && (
+          <div >
+            ⚠️ {error}
+          </div>
+        )}
         {/* Header */}
         <header style={styles.header}>
           <div style={styles.headerLeft}>
             <img src="seismic.svg" alt="" />
-            
-            {/* <div style={styles.headerText}>
-              <h1 style={styles.mainTitle}>Seismic Trading Bot</h1>
-              <p style={styles.subtitle}>AI-Powered Market Intelligence</p>
-            </div> */}
+            <div style={styles.headerText}>
+              {/* <h1 style={styles.mainTitle}>Seismic Trading Bot</h1>
+              <p style={styles.subtitle}>
+                {botStatus.aiType} • {botStatus.isActive ? ' Active' : ' Inactive'}
+              </p> */}
+            </div>
           </div>
-          <button 
-            onClick={fetchData}
-            disabled={refreshing}
-            style={styles.refreshButton}
-            className="refresh-btn"
-          >
-            <span style={{...styles.refreshIcon, ...(refreshing ? styles.spinning : {})}}>↻</span>
-            Refresh
-          </button>
+          <div style={{display: 'flex', gap: '1rem'}}>
+            <button
+              onClick={fetchData}
+              disabled={refreshing}
+              style={styles.refreshButton}
+              className="refresh-btn"
+            >
+              <span style={{...styles.refreshIcon, ...(refreshing ? styles.spinning : {})}}>↻</span>
+              Refresh
+            </button>
+            {botStatus.isActive ? (
+              <button
+                onClick={stopBot}
+                style={{...styles.refreshButton, background: 'rgba(239, 68, 68, 0.3)'}}
+                className="refresh-btn"
+              >
+                ⏸ Stop Bot
+              </button>
+            ) : (
+              <button
+                onClick={startBot}
+                style={{...styles.refreshButton, background: 'rgba(34, 197, 94, 0.3)'}}
+                className="refresh-btn"
+              >
+                ▶ Start Bot
+              </button>
+            )}
+          </div>
         </header>
-
         {/* AI Signal Banner */}
         <div style={{
           ...styles.signalBanner,
-          background: signal === 'Buy' ? 'linear-gradient(135deg, #10b981, #059669)' : 
-                      signal === 'Sell' ? 'linear-gradient(135deg, #ef4444, #dc2626)' : 
-                      'linear-gradient(135deg, #3b82f6, #2563eb)'
+          background: signal === 'BUY' ? 'linear-gradient(135deg, #10b981, #059669)' :
+          signal === 'SELL' ? 'linear-gradient(135deg, #ef4444, #dc2626)' :
+          'linear-gradient(135deg, #3b82f6, #2563eb)'
         }} className="signal-banner">
           <div style={styles.signalContent}>
             <span style={styles.pulseIndicator}></span>
             <h2 style={styles.signalTitle}>AI SIGNAL: {signal}</h2>
           </div>
           <p style={styles.signalConfidence}>
-            Confidence: {(sentiment * 100).toFixed(0)}%
+            Confidence: {(sentiment * 100).toFixed(0)}% • Daily Trades: {botStatus.dailyTradeCount}/2
           </p>
         </div>
-
         {/* Stats Grid */}
         <div style={styles.statsGrid}>
           <div style={styles.statCard} className="card-hover">
@@ -140,23 +282,19 @@ export default function Dashboard() {
                 <span style={styles.trendUp}>↗</span>
               </div>
             </div>
-            {/* <p style={styles.statLabel}>Balance</p> */}
+            <p style={styles.statLabel}></p>
             <h3 style={styles.statValue}>${balance}</h3>
           </div>
-
           <div style={styles.statCard} className="card-hover">
             <div style={styles.statHeader}>
               <span style={styles.statIcon}>Active Trades</span>
               <div style={styles.iconBadge}>
-                <span style={styles.activeDot}></span>
+                <span style={{...styles.activeDot, backgroundColor: botStatus.activePositions > 0 ? '#10b981' : '#64748b'}}></span>
               </div>
             </div>
-            {/* <p style={styles.statLabel}>Active Trades</p> */}
-            <h3 style={styles.statValue}>
-              {trades.filter(t => t.status === 'Active').length}
-            </h3>
+            <p style={styles.statLabel}></p>
+            <h3 style={styles.statValue}>{botStatus.activePositions}</h3>
           </div>
-
           <div style={styles.statCard} className="card-hover">
             <div style={styles.statHeader}>
               <span style={styles.statIcon}>BTC Price</span>
@@ -164,7 +302,7 @@ export default function Dashboard() {
                 {btcChange > 0 ? '↗' : '↘'}
               </span>
             </div>
-            {/* <p style={styles.statLabel}>BTC Price</p> */}
+            <p style={styles.statLabel}></p>
             <div style={styles.priceContainer}>
               <h3 style={styles.statValue}>${btcPrice.toLocaleString()}</h3>
               <span style={{...styles.priceChange, color: btcChange > 0 ? '#6ee7b7' : '#fca5a5'}}>
@@ -172,13 +310,12 @@ export default function Dashboard() {
               </span>
             </div>
           </div>
-
           <div style={styles.statCard} className="card-hover">
             <div style={styles.statHeader}>
-              <span style={styles.statIcon}>Sentiment</span>
-              {/* <div style={styles.aiBadge}>AI</div> */}
+              <span style={styles.statIcon}>AI Sentiment</span>
+              <div style={styles.aiBadge}>FREE</div>
             </div>
-            {/* <p style={styles.statLabel}>Sentiment</p> */}
+            <p style={styles.statLabel}></p>
             <div style={styles.sentimentContainer}>
               <h3 style={styles.statValue}>{(sentiment * 100).toFixed(0)}%</h3>
               <div style={styles.progressBar}>
@@ -187,7 +324,6 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
-
         {/* Chart + News */}
         <div style={styles.contentGrid}>
           <div style={styles.chartCard} className="card-hover">
@@ -199,9 +335,9 @@ export default function Dashboard() {
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
                     <XAxis dataKey="time" stroke="rgba(255,255,255,0.7)" style={{fontSize: '12px'}} />
                     <YAxis stroke="rgba(255,255,255,0.7)" style={{fontSize: '12px'}} />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: 'rgba(109, 87, 112, 0.95)', 
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'rgba(109, 87, 112, 0.95)',
                         border: '1px solid rgba(255,255,255,0.2)',
                         borderRadius: '12px',
                         backdropFilter: 'blur(10px)',
@@ -210,36 +346,41 @@ export default function Dashboard() {
                       labelStyle={{ color: '#fff', fontWeight: 'bold' }}
                       formatter={(value: number) => [`$${value.toLocaleString()}`, 'Price']}
                     />
-                    <Line 
-                      type="monotone" 
-                      dataKey="price" 
-                      stroke="#a594a8" 
-                      strokeWidth={3} 
+                    <Line
+                      type="monotone"
+                      dataKey="price"
+                      stroke="#a594a8"
+                      strokeWidth={3}
                       dot={false}
                     />
                   </LineChart>
                 </ResponsiveContainer>
               ) : (
-                <div style={styles.noData}>No chart data available</div>
+                <div style={styles.noData}>Loading chart data...</div>
               )}
             </div>
           </div>
-
           <div style={styles.newsCard} className="card-hover">
             <div style={styles.newsHeader}>
               <span style={styles.newsIcon}></span>
               <h3 style={styles.cardTitle}>Latest News</h3>
             </div>
             <div style={styles.newsList}>
-              {news.map((title, i) => (
-                <div key={i} style={styles.newsItem} className="news-item">
-                  <p style={styles.newsText}>{title}</p>
+              {news.length > 0 ? news.map((item, i) => (
+                // Updated to use item.title and item.link consistently
+                <div >
+                    <a href={item.link} style={styles.linkstyle} target="_blank" rel="noopener noreferrer">
+                  <div key={i} style={styles.newsItem} className="news-item">
+                    <p style={styles.newsText}>{item.title}</p>
+                  </div>
+                  </a>
                 </div>
-              ))}
+              )) : (
+                <div style={styles.noData}>Loading news...</div>
+              )}
             </div>
           </div>
         </div>
-
         {/* Trade History */}
         <div style={styles.tradeCard} className="card-hover">
           <h3 style={styles.cardTitle}>Trade History</h3>
@@ -259,7 +400,9 @@ export default function Dashboard() {
                 {trades.length === 0 ? (
                   <tr>
                     <td colSpan={6} style={styles.noTrades}>
-                      No trades yet. AI is analyzing market conditions...
+                      {botStatus.isActive
+                        ? 'No trades yet. AI is analyzing the market...'
+                        : 'Start the bot to begin trading'}
                     </td>
                   </tr>
                 ) : (
@@ -289,10 +432,21 @@ export default function Dashboard() {
             </table>
           </div>
         </div>
+        {/* Connection Status */}
+        {/* <div style={styles.footer}>
+          <p style={styles.footerText}>
+            {error ? ' Backend Disconnected' : ' Connected to Backend'} •
+            API: {API_URL} •
+            Updates every 30s
+          </p>
+        </div> */}
       </div>
     </div>
   )
 }
+
+// styles and cssStyles remain unchanged
+
 
 const styles = {
   pageWrapper: {
@@ -322,7 +476,8 @@ const styles = {
   loadingTitle: {
     fontSize: '3rem',
     fontWeight: 'bold',
-    color: 'white',
+    color: '#383838',
+
     marginBottom: '1rem',
   },
   loadingText: {
@@ -359,7 +514,7 @@ const styles = {
   mainTitle: {
     fontSize: '2rem',
     fontWeight: 'bold',
-    color: 'white',
+    color: '#383838',
     margin: 0,
   },
   subtitle: {
@@ -371,7 +526,7 @@ const styles = {
     background: 'rgba(255, 255, 255, 0.2)',
     backdropFilter: 'blur(10px)',
     border: '1px solid rgba(255, 255, 255, 0.2)',
-    color: 'white',
+    color: '#383838',
     padding: '0.875rem 1.75rem',
     borderRadius: '16px',
     fontSize: '1rem',
@@ -412,7 +567,7 @@ const styles = {
   signalTitle: {
     fontSize: '2.5rem',
     fontWeight: 'bold',
-    color: 'white',
+    color: '#383838',
     margin: 0,
   },
   signalConfidence: {
@@ -443,8 +598,8 @@ const styles = {
   },
   statIcon: {
     fontSize: '2rem',
-    color: 'black',
-    fontWeight: '400',
+    color: 'white',
+    fontWeight: '600',
   },
   iconBadge: {
     background: 'rgba(255, 255, 255, 0.2)',
@@ -475,7 +630,7 @@ const styles = {
     borderRadius: '12px',
     fontSize: '0.875rem',
     fontWeight: '600',
-    color: 'white',
+    color: '#383838',
   },
   statLabel: {
     fontSize: '0.875rem',
@@ -485,7 +640,7 @@ const styles = {
   statValue: {
     fontSize: '2rem',
     fontWeight: 'bold',
-    color: 'white',
+    color: '#383838',
     margin: 0,
   },
   priceContainer: {
@@ -540,8 +695,11 @@ const styles = {
     boxShadow: '0 10px 40px rgba(0, 0, 0, 0.2)',
     transition: 'all 0.3s ease',
   },
+  linkstyle: {
+    textDecoration: 'none',
+  },
   cardTitle: {
-    fontSize: '1.25rem',
+    fontSize: '2.25rem',
     fontWeight: 'bold',
     color: 'white',
     marginBottom: '1.5rem',
@@ -620,7 +778,7 @@ const styles = {
   },
   tableCell: {
     padding: '1.25rem 1rem',
-    color: 'white',
+    color: '#383838',
     fontSize: '0.9375rem',
   },
   statusBadge: {
