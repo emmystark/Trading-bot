@@ -1,6 +1,10 @@
 'use client'
+import { Zap } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { ethers } from 'ethers';
+
+
 
 interface Trade {
   id: string
@@ -17,12 +21,17 @@ interface MarketData {
   signal: string
   sentiment: number
   prices: {
-    bitcoin: {
+    [key: string]: {
       usd: number
       usd_24h_change: number
     }
   }
-  // Removed news field, as it's now fetched separately
+}
+
+interface CoinOption {
+  value: string
+  label: string
+  symbol: string
 }
 
 export default function Dashboard() {
@@ -30,10 +39,9 @@ export default function Dashboard() {
   const [chartData, setChartData] = useState<any[]>([])
   const [balance, setBalance] = useState<string>('0')
   const [signal, setSignal] = useState<string>('Hold')
-  const [btcPrice, setBtcPrice] = useState<number>(0)
-  const [btcChange, setBtcChange] = useState<number>(0)
+  const [coinPrice, setCoinPrice] = useState<number>(0)
+  const [coinChange, setCoinChange] = useState<number>(0)
   const [sentiment, setSentiment] = useState<number>(0)
-  // Updated news state to array of objects for title and link
   const [news, setNews] = useState<{title: string, link: string}[]>([])
   const [loading, setLoading] = useState<boolean>(true)
   const [refreshing, setRefreshing] = useState<boolean>(false)
@@ -44,66 +52,120 @@ export default function Dashboard() {
     activePositions: 0,
     aiType: 'Free Technical Analysis'
   })
+  
+  // New states for coin selection
+  const [selectedCoin, setSelectedCoin] = useState<CoinOption>({ value: 'bitcoin', label: 'Bitcoin', symbol: 'BTC' })
+  const [coinOptions, setCoinOptions] = useState<CoinOption[]>([])
+  const [searchTerm, setSearchTerm] = useState('')
+  const [showDropdown, setShowDropdown] = useState(false)
 
-  // Backend URL - change this if deployed elsewhere
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
+
+  // Fetch dynamic list of coins from CoinGecko API
+  const fetchCoins = async () => {
+    try {
+      const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1&sparkline=false')
+      if (res.ok) {
+        const data = await res.json()
+        const options = data.map((coin: any) => ({
+          value: coin.id,
+          label: coin.name,
+          symbol: coin.symbol.toUpperCase()
+        }))
+        setCoinOptions(options)
+        console.log('Coins loaded:', options.length)
+      }
+    } catch (err) {
+      console.error('Failed to fetch coin list:', err)
+      // Fallback to common coins
+      setCoinOptions([
+        { value: 'bitcoin', label: 'Bitcoin', symbol: 'BTC' },
+        { value: 'ethereum', label: 'Ethereum', symbol: 'ETH' },
+        { value: 'tether', label: 'Tether', symbol: 'USDT' },
+        { value: 'binancecoin', label: 'BNB', symbol: 'BNB' },
+        { value: 'solana', label: 'Solana', symbol: 'SOL' },
+      ])
+    }
+  }
+
+  // Fetch 24hr chart data for selected coin from CoinGecko
+  const fetchChartData = async (coinId: string) => {
+    try {
+      const res = await fetch(`https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=usd&days=1&interval=hourly`)
+      if (res.ok) {
+        const data = await res.json()
+        const formattedData = data.prices.map((item: any) => {
+          const date = new Date(item[0])
+          return {
+            time: `${date.getHours()}:00`,
+            price: item[1]
+          }
+        })
+        setChartData(formattedData)
+        console.log('Chart data loaded:', formattedData.length)
+      }
+    } catch (err) {
+      console.error('Failed to fetch chart data:', err)
+    }
+  }
 
   const fetchData = async () => {
     try {
       setRefreshing(true)
       setError('')
-      console.log('Fetching data from:', API_URL)
+      console.log('Fetching data from:', API_URL, 'for coin:', selectedCoin.value)
 
-      // Added newsRes to Promise.all for parallel fetching from CryptoCompare API
+      // Fetch chart data for selected coin
+      await fetchChartData(selectedCoin.value)
+
+      const coinParam = `?coin=${selectedCoin.symbol}`
+
       const [tradesRes, marketRes, botStatusRes, newsRes] = await Promise.all([
-        fetch(`${API_URL}/api/trades`).catch(e => {
+        fetch(`${API_URL}/api/trades${coinParam}`).catch(e => {
           console.error('Trades API error:', e)
           return { ok: false, json: async () => [] }
         }),
-        fetch(`${API_URL}/api/market`).catch(e => {
+        fetch(`${API_URL}/api/market${coinParam}`).catch(e => {
           console.error('Market API error:', e)
           return { ok: false, json: async () => null }
         }),
-        fetch(`${API_URL}/api/bot/status`).catch(e => {
+        fetch(`${API_URL}/api/bot/status${coinParam}`).catch(e => {
           console.error('Status API error:', e)
           return { ok: false, json: async () => null }
         }),
-        // New: Fetch latest crypto news from CryptoCompare API (filtered for relevance)
-        fetch('https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories=Market,Blockchain,BTC,ETH').catch(e => {
+        // Fetch news for selected coin from CryptoCompare
+        fetch(`https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories=${selectedCoin.symbol}`).catch(e => {
           console.error('Crypto news API error:', e)
           return { ok: false, json: async () => ({ Data: [] }) }
         })
       ])
 
-      // Process trades
       if (tradesRes.ok) {
         const tradesData = await tradesRes.json()
         setTrades(Array.isArray(tradesData) ? tradesData : [])
         console.log('Trades loaded:', tradesData.length)
       }
 
-      // Process market data (removed news handling)
       if (marketRes.ok) {
         const marketData: MarketData = await marketRes.json()
-        setChartData(marketData.chartData || [])
         setSignal(marketData.signal || 'Hold')
         setSentiment(marketData.sentiment || 0.5)
-        setBtcPrice(marketData.prices?.bitcoin?.usd || 0)
-        setBtcChange(marketData.prices?.bitcoin?.usd_24h_change || 0)
-        console.log('Market data loaded:', {
-          signal: marketData.signal,
-          price: marketData.prices?.bitcoin?.usd
-        })
+        
+        // Use CoinGecko data for price
+        const priceRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${selectedCoin.value}&vs_currencies=usd&include_24hr_change=true`)
+        if (priceRes.ok) {
+          const priceData = await priceRes.json()
+          setCoinPrice(priceData[selectedCoin.value]?.usd || 0)
+          setCoinChange(priceData[selectedCoin.value]?.usd_24h_change || 0)
+        }
       }
 
-      // Process bot status
       if (botStatusRes.ok) {
         const statusData = await botStatusRes.json()
         setBotStatus(statusData)
         console.log('Bot status:', statusData)
       }
 
-      // New: Process crypto news
       if (newsRes.ok) {
         const newsData = await newsRes.json()
         setNews(newsData.Data.slice(0, 4).map((article: any) => ({
@@ -113,34 +175,39 @@ export default function Dashboard() {
         console.log('Crypto news loaded:', newsData.Data.length)
       }
 
-      // Mock balance for demo (replace with actual contract call)
+      // Mock balance - replace with actual contract balance fetch
+      // Example: const balance = await contract.balanceOf(userAddress)
       setBalance('1.2547')
       console.log('All data loaded successfully!')
     } catch (err) {
       console.error('Fetch error:', err)
       setError('Failed to connect to backend. Make sure the server is running on port 3001.')
-      // Load mock data so UI isn't empty
-      setChartData(Array.from({length: 24}, (_, i) => ({
-        time: `${i}:00`,
-        price: 60000 + i * 50 + Math.random() * 200
-      })))
-      setSignal('Hold')
-      setBalance('1.547')
-      setBtcPrice(61234)
-      setBtcChange(2.34)
-      setSentiment(0.65)
-      // Updated mock news to include links
-      setNews([
-        { title: 'Bitcoin shows strong momentum as institutional adoption grows', link: 'https://example.com/news1' },
-        { title: 'Ethereum Layer 2 solutions reach new all-time high in usage', link: 'https://example.com/news2' },
-        { title: 'Market sentiment remains bullish despite regulatory concerns', link: 'https://example.com/news3' },
-        { title: 'DeFi protocols see record trading volumes this week', link: 'https://example.com/news4' }
-      ])
     } finally {
       setLoading(false)
       setRefreshing(false)
     }
   }
+
+//   const fetchBalance = async () => {
+//   try {
+//     // Connect to provider
+//     const provider = new ethers.providers.Web3Provider(window.ethereum);
+//     const signer = provider.getSigner();
+//     const userAddress = await signer.getAddress();
+    
+//     // Your contract address from GitHub repo
+//     const contractAddress = '0xYourContractAddress';
+//     const contractABI = [/* Your ABI */];
+    
+//     const contract = new ethers.Contract(contractAddress, contractABI, signer);
+//     const balance = await contract.balanceOf(userAddress);
+    
+//     // Convert from Wei to readable format
+//     setBalance(ethers.utils.formatEther(balance));
+//   } catch (error) {
+//     console.error('Failed to fetch balance:', error);
+//   }
+// };
 
   const startBot = async () => {
     try {
@@ -148,14 +215,19 @@ export default function Dashboard() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userAddress: '0xYourAddress', // Replace with actual user address
-          privateKey: process.env.NEXT_PUBLIC_BOT_PRIVATE_KEY // For demo only
+          userAddress: '0xYourAddress', // Replace with actual wallet address
+          privateKey: process.env.NEXT_PUBLIC_BOT_PRIVATE_KEY,
+          coin: selectedCoin.symbol,
+          coinId: selectedCoin.value
         })
       })
       if (response.ok) {
         const data = await response.json()
         alert(data.message)
-        fetchData() // Refresh status
+        fetchData()
+      } else {
+        const errorData = await response.json()
+        alert(`Failed to start bot: ${errorData.message || 'Unknown error'}`)
       }
     } catch (err) {
       console.error('Start bot error:', err)
@@ -167,12 +239,18 @@ export default function Dashboard() {
     try {
       const response = await fetch(`${API_URL}/api/bot/stop`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          coin: selectedCoin.symbol
+        })
       })
       if (response.ok) {
         const data = await response.json()
         alert(data.message)
-        fetchData() // Refresh status
+        fetchData()
+      } else {
+        const errorData = await response.json()
+        alert(`Failed to stop bot: ${errorData.message || 'Unknown error'}`)
       }
     } catch (err) {
       console.error('Stop bot error:', err)
@@ -181,55 +259,82 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    fetchData()
-    const interval = setInterval(fetchData, 30000) // Refresh every 30 seconds
-    return () => clearInterval(interval)
+    fetchCoins()
   }, [])
 
-  if (loading) {
-    return (
-      <div style={styles.loadingContainer}>
-        <div style={styles.loadingContent}>
-          <div style={styles.logoContainer}>
-            <svg width="100" height="100" viewBox="0 0 200 200" style={styles.pulsingLogo}>
-              <polygon points="100,40 140,80 140,140 100,180 60,140 60,80" fill="#6d5770" opacity="0.8"/>
-              <polygon points="100,40 140,80 100,100" fill="#8b7b8f"/>
-              <polygon points="140,80 140,140 100,100" fill="#7a6a7d"/>
-              <polygon points="100,100 140,140 100,180" fill="#9d8ba0"/>
-              <polygon points="60,80 100,100 60,140" fill="#b39bb7"/>
-              <polygon points="100,40 60,80 100,100" fill="#a594a8"/>
-            </svg>
-          </div>
-          <h2 style={styles.loadingTitle}>Seismic AI</h2>
-          <p style={styles.loadingText}>Loading market data...</p>
-          {error && <p style={{...styles.loadingText, color: '#fca5a5'}}>{error}</p>}
-        </div>
-      </div>
-    )
-  }
+  useEffect(() => {
+    if (coinOptions.length > 0) {
+      fetchData()
+      const interval = setInterval(fetchData, 30000)
+      return () => clearInterval(interval)
+    }
+  }, [selectedCoin])
+
+  const filteredCoins = coinOptions.filter(coin => 
+    coin.label.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    coin.symbol.toLowerCase().includes(searchTerm.toLowerCase())
+  )
+
+
 
   return (
     <div style={styles.pageWrapper}>
       <style>{cssStyles}</style>
       <div style={styles.container}>
-        {/* Error Banner */}
         {error && (
-          <div >
-            ⚠️ {error}
+          <div style={styles.errorBanner}>
+             {error}
           </div>
         )}
-        {/* Header */}
+        
         <header style={styles.header}>
           <div style={styles.headerLeft}>
             <img src="seismic.svg" alt="" />
-            <div style={styles.headerText}>
-              {/* <h1 style={styles.mainTitle}>Seismic Trading Bot</h1>
-              <p style={styles.subtitle}>
-                {botStatus.aiType} • {botStatus.isActive ? ' Active' : ' Inactive'}
-              </p> */}
-            </div>
+            <div style={styles.headerText}></div>
           </div>
-          <div style={{display: 'flex', gap: '1rem'}}>
+          <div style={{display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap'}}>
+            {/* Custom Searchable Dropdown */}
+            <div style={styles.dropdownContainer}>
+              <div 
+                style={styles.dropdownButton}
+                onClick={() => setShowDropdown(!showDropdown)}
+              >
+                <span style={styles.dropdownText}>
+                  {selectedCoin.label} ({selectedCoin.symbol})
+                </span>
+                <span style={styles.dropdownArrow}>{showDropdown ? '▲' : '▼'}</span>
+              </div>
+              {showDropdown && (
+                <div style={styles.dropdownMenu}>
+                  <input
+                    type="text"
+                    placeholder="Search coin..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    style={styles.searchInput}
+                    autoFocus
+                  />
+                  <div style={styles.optionsList}>
+                    {filteredCoins.slice(0, 50).map((coin) => (
+                      <div
+                        key={coin.value}
+                        style={styles.option}
+                        className="dropdown-option"
+                        onClick={() => {
+                          setSelectedCoin(coin)
+                          setShowDropdown(false)
+                          setSearchTerm('')
+                        }}
+                      >
+                        <span style={styles.optionLabel}>{coin.label}</span>
+                        <span style={styles.optionSymbol}>{coin.symbol}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <button
               onClick={fetchData}
               disabled={refreshing}
@@ -258,7 +363,7 @@ export default function Dashboard() {
             )}
           </div>
         </header>
-        {/* AI Signal Banner */}
+
         <div style={{
           ...styles.signalBanner,
           background: signal === 'BUY' ? 'linear-gradient(135deg, #10b981, #059669)' :
@@ -266,14 +371,14 @@ export default function Dashboard() {
           'linear-gradient(135deg, #3b82f6, #2563eb)'
         }} className="signal-banner">
           <div style={styles.signalContent}>
-            <span style={styles.pulseIndicator}></span>
+            <span style={styles.pulseIndicator}>●</span>
             <h2 style={styles.signalTitle}>AI SIGNAL: {signal}</h2>
           </div>
           <p style={styles.signalConfidence}>
             Confidence: {(sentiment * 100).toFixed(0)}% • Daily Trades: {botStatus.dailyTradeCount}/2
           </p>
         </div>
-        {/* Stats Grid */}
+
         <div style={styles.statsGrid}>
           <div style={styles.statCard} className="card-hover">
             <div style={styles.statHeader}>
@@ -297,16 +402,16 @@ export default function Dashboard() {
           </div>
           <div style={styles.statCard} className="card-hover">
             <div style={styles.statHeader}>
-              <span style={styles.statIcon}>BTC Price</span>
-              <span style={{...styles.trendIndicator, color: btcChange > 0 ? '#6ee7b7' : '#fca5a5'}}>
-                {btcChange > 0 ? '↗' : '↘'}
+              <span style={styles.statIcon}>{selectedCoin.symbol} Price</span>
+              <span style={{...styles.trendIndicator, color: coinChange > 0 ? '#6ee7b7' : '#fca5a5'}}>
+                {coinChange > 0 ? '↗' : '↘'}
               </span>
             </div>
             <p style={styles.statLabel}></p>
             <div style={styles.priceContainer}>
-              <h3 style={styles.statValue}>${btcPrice.toLocaleString()}</h3>
-              <span style={{...styles.priceChange, color: btcChange > 0 ? '#6ee7b7' : '#fca5a5'}}>
-                {btcChange > 0 ? '+' : ''}{btcChange.toFixed(2)}%
+              <h3 style={styles.statValue}>${coinPrice.toLocaleString()}</h3>
+              <span style={{...styles.priceChange, color: coinChange > 0 ? '#6ee7b7' : '#fca5a5'}}>
+                {coinChange > 0 ? '+' : ''}{coinChange.toFixed(2)}%
               </span>
             </div>
           </div>
@@ -324,10 +429,10 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
-        {/* Chart + News */}
+
         <div style={styles.contentGrid}>
           <div style={styles.chartCard} className="card-hover">
-            <h3 style={styles.cardTitle}>BTC 24hr Chart</h3>
+            <h3 style={styles.cardTitle}>{selectedCoin.symbol} 24hr Chart</h3>
             <div style={styles.chartContainer}>
               {chartData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
@@ -362,26 +467,23 @@ export default function Dashboard() {
           </div>
           <div style={styles.newsCard} className="card-hover">
             <div style={styles.newsHeader}>
-              <span style={styles.newsIcon}></span>
+              <span style={styles.newsIcon}>📰</span>
               <h3 style={styles.cardTitle}>Latest News</h3>
             </div>
             <div style={styles.newsList}>
               {news.length > 0 ? news.map((item, i) => (
-                // Updated to use item.title and item.link consistently
-                <div >
-                    <a href={item.link} style={styles.linkstyle} target="_blank" rel="noopener noreferrer">
-                  <div key={i} style={styles.newsItem} className="news-item">
+                <a key={i} href={item.link} style={styles.linkstyle} target="_blank" rel="noopener noreferrer">
+                  <div style={styles.newsItem} className="news-item">
                     <p style={styles.newsText}>{item.title}</p>
                   </div>
-                  </a>
-                </div>
+                </a>
               )) : (
                 <div style={styles.noData}>Loading news...</div>
               )}
             </div>
           </div>
         </div>
-        {/* Trade History */}
+
         <div style={styles.tradeCard} className="card-hover">
           <h3 style={styles.cardTitle}>Trade History</h3>
           <div style={styles.tableWrapper}>
@@ -432,23 +534,18 @@ export default function Dashboard() {
             </table>
           </div>
         </div>
-        {/* Connection Status */}
-        {/* <div style={styles.footer}>
-          <p style={styles.footerText}>
-            {error ? ' Backend Disconnected' : ' Connected to Backend'} •
-            API: {API_URL} •
-            Updates every 30s
-          </p>
-        </div> */}
       </div>
     </div>
   )
 }
 
-// styles and cssStyles remain unchanged
+
 
 
 const styles = {
+
+
+  
   pageWrapper: {
     minHeight: '100vh',
     background: 'linear-gradient(135deg, #8b7b8f 0%, #9d8ba0 50%, #b39bb7 100%)',
@@ -477,7 +574,6 @@ const styles = {
     fontSize: '3rem',
     fontWeight: 'bold',
     color: '#383838',
-
     marginBottom: '1rem',
   },
   loadingText: {
@@ -488,7 +584,16 @@ const styles = {
     maxWidth: '1400px',
     margin: '0 auto',
   },
+  errorBanner: {
+    background: 'rgba(239, 68, 68, 0.2)',
+    border: '1px solid rgba(239, 68, 68, 0.5)',
+    borderRadius: '12px',
+    padding: '1rem',
+    marginBottom: '1rem',
+    color: '#fff',
+  },
   header: {
+    zIndex: 1000,
     background: 'rgba(255, 255, 255, 0.1)',
     backdropFilter: 'blur(20px)',
     borderRadius: '24px',
@@ -511,16 +616,81 @@ const styles = {
     display: 'flex',
     flexDirection: 'column' as const,
   },
-  mainTitle: {
-    fontSize: '2rem',
-    fontWeight: 'bold',
-    color: '#383838',
-    margin: 0,
+  dropdownContainer: {
+    position: 'relative' as const,
+    minWidth: '220px',
+    zIndex: 1001,
   },
-  subtitle: {
-    fontSize: '0.875rem',
+  dropdownButton: {
+    background: 'rgba(255, 255, 255, 0.2)',
+    backdropFilter: 'blur(10px)',
+    border: '1px solid rgba(255, 255, 255, 0.2)',
+    borderRadius: '16px',
+    padding: '0.875rem 1.5rem',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '1rem',
+    transition: 'all 0.3s ease',
+  },
+  dropdownText: {
+    color: '#383838',
+    fontWeight: '600',
+    fontSize: '1rem',
+  },
+  dropdownArrow: {
+    color: '#383838',
+    fontSize: '0.75rem',
+  },
+  dropdownMenu: {
+    position: 'absolute' as const,
+  top: '100%',
+  left: 0,
+  right: 0,
+  marginTop: '0.5rem',
+  background: 'rgba(109, 87, 112, 0.98)',
+  backdropFilter: 'blur(20px)',
+  border: '1px solid rgba(255, 255, 255, 0.2)',
+  borderRadius: '16px',
+  boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+  zIndex: 1002, // Increase from 1000
+  maxHeight: '400px',
+  overflow: 'hidden',
+  display: 'flex',
+  flexDirection: 'column' as const,
+  },
+  searchInput: {
+    width: '100%',
+    padding: '1rem',
+    border: 'none',
+    borderBottom: '1px solid rgba(255, 255, 255, 0.2)',
+    background: 'transparent',
+    color: '#fff',
+    fontSize: '1rem',
+    outline: 'none',
+  },
+  optionsList: {
+    overflowY: 'auto' as const,
+    maxHeight: '340px',
+    zIndex: '9999px',
+  },
+  option: {
+    padding: '1rem 1.5rem',
+    cursor: 'pointer',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    transition: 'background 0.2s ease',
+  },
+  optionLabel: {
+    color: '#fff',
+    fontSize: '0.9375rem',
+  },
+  optionSymbol: {
     color: 'rgba(255, 255, 255, 0.7)',
-    margin: 0,
+    fontSize: '0.875rem',
+    fontWeight: '600',
   },
   refreshButton: {
     background: 'rgba(255, 255, 255, 0.2)',
@@ -552,7 +722,9 @@ const styles = {
     boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
     border: '1px solid rgba(255, 255, 255, 0.2)',
     transition: 'transform 0.3s ease',
+    zIndex: 0,
   },
+  
   signalContent: {
     display: 'flex',
     alignItems: 'center',
@@ -563,6 +735,7 @@ const styles = {
   pulseIndicator: {
     fontSize: '2rem',
     animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+    color: '#fff',
   },
   signalTitle: {
     fontSize: '2.5rem',
@@ -589,6 +762,7 @@ const styles = {
     border: '1px solid rgba(255, 255, 255, 0.2)',
     boxShadow: '0 10px 40px rgba(0, 0, 0, 0.2)',
     transition: 'all 0.3s ease',
+    zIndex: 0,
   },
   statHeader: {
     display: 'flex',
@@ -697,6 +871,7 @@ const styles = {
   },
   linkstyle: {
     textDecoration: 'none',
+    color: 'inherit'
   },
   cardTitle: {
     fontSize: '2.25rem',
@@ -794,6 +969,9 @@ const styles = {
     color: 'rgba(255, 255, 255, 0.5)',
     fontSize: '1rem',
   },
+
+
+  
 }
 
 const cssStyles = `
@@ -829,6 +1007,7 @@ const cssStyles = `
     transform: scale(1.02);
   }
 
+
   .card-hover:hover {
     transform: translateY(-5px);
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3) !important;
@@ -841,6 +1020,11 @@ const cssStyles = `
 
   .table-row-hover:hover {
     background: rgba(255, 255, 255, 0.05) !important;
+  }
+
+  .dropdown-option:hover {
+  menuPortal: (base) => ({ ...base, zIndex: 9999 }),
+    background: rgba(255, 255, 255, 0.1) !important;
   }
 
   @media (max-width: 768px) {

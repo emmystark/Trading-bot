@@ -27,52 +27,7 @@ let botState = {
 };
 
 // Mock data for when APIs are rate limited
-const MOCK_DATA = {
-  coins: [
-    {
-      id: 'bitcoin',
-      symbol: 'BTC',
-      name: 'Bitcoin',
-      current_price: 61234,
-      price_change_percentage_24h: 2.34,
-      market_cap: 1200000000000,
-      total_volume: 28000000000,
-      sparkline_in_7d: {
-        price: Array.from({length: 168}, (_, i) => 60000 + Math.sin(i / 20) * 2000 + Math.random() * 500)
-      }
-    },
-    {
-      id: 'ethereum',
-      symbol: 'ETH',
-      name: 'Ethereum',
-      current_price: 3245,
-      price_change_percentage_24h: 1.87,
-      market_cap: 390000000000,
-      total_volume: 15000000000,
-      sparkline_in_7d: {
-        price: Array.from({length: 168}, (_, i) => 3200 + Math.sin(i / 15) * 100 + Math.random() * 50)
-      }
-    },
-    {
-      id: 'solana',
-      symbol: 'SOL',
-      name: 'Solana',
-      current_price: 98.5,
-      price_change_percentage_24h: 3.21,
-      market_cap: 44000000000,
-      total_volume: 2000000000,
-      sparkline_in_7d: {
-        price: Array.from({length: 168}, (_, i) => 95 + Math.sin(i / 10) * 5 + Math.random() * 2)
-      }
-    }
-  ],
-  news: [
-    { title: 'Bitcoin institutional adoption reaches new heights in 2025' },
-    { title: 'Ethereum scaling solutions show promising results' },
-    { title: 'DeFi protocols report record trading volumes' },
-    { title: 'Crypto market sentiment remains cautiously optimistic' }
-  ]
-};
+
 
 // FREE AI Analysis using technical indicators only
 function analyzeMarketFree(coinData, newsData, historicalData) {
@@ -271,7 +226,7 @@ async function fetchMarketData() {
         };
       } catch (error) {
         if (error.response?.status === 429) {
-          console.log('⚠️ CoinGecko rate limit hit - using cached/mock data');
+          console.log(' CoinGecko rate limit hit - using cached/mock data');
         }
         throw error;
       }
@@ -299,7 +254,7 @@ function calculateIndicators(priceHistory) {
     };
   }
   
-  // RSI
+  // RSI 
   const gains = [];
   const losses = [];
   for (let i = 1; i < prices.length; i++) {
@@ -362,11 +317,6 @@ async function findBestTradingOpportunity() {
   
   return opportunities.sort((a, b) => b.score - a.score)[0];
 }
-
-// API Endpoints
-app.get('/api/trades', (req, res) => {
-  res.json(botState.tradingHistory.slice(-20));
-});
 
 app.get('/api/balance', async (req, res) => {
   try {

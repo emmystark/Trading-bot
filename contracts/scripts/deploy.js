@@ -17,7 +17,7 @@ async function main() {
   const FEE_COLLECTOR = process.env.FEE_COLLECTOR_ADDRESS || deployer.address;
 
   if (TRADING_TOKEN === "0x0000000000000000000000000000000000000000") {
-    console.log("⚠️  Warning: TRADING_TOKEN_ADDRESS not set. Please set it in .env");
+    console.log("  Warning: TRADING_TOKEN_ADDRESS not set. Please set it in .env");
     console.log("   For Seismic testnet, you may need to deploy a mock USDT first.\n");
   }
 
@@ -116,7 +116,7 @@ async function main() {
       });
       console.log("✅ Contract verified!\n");
     } catch (error) {
-      console.log("⚠️  Verification failed:", error.message);
+      console.log("  Verification failed:", error.message);
       console.log("   You can verify manually later.\n");
     }
   }

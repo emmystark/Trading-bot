@@ -298,7 +298,7 @@ git push origin feature/amazing-feature
 
 ---
 
-## ⚠️ Disclaimer
+##  Disclaimer
 
 This software is provided "as is" without warranty of any kind. Trading cryptocurrencies involves substantial risk of loss. The developers assume no responsibility for any losses incurred through the use of this bot.
 
