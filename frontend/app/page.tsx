@@ -188,26 +188,6 @@ export default function Dashboard() {
     }
   }
 
-//   const fetchBalance = async () => {
-//   try {
-//     // Connect to provider
-//     const provider = new ethers.providers.Web3Provider(window.ethereum);
-//     const signer = provider.getSigner();
-//     const userAddress = await signer.getAddress();
-    
-//     // Your contract address from GitHub repo
-//     const contractAddress = '0xYourContractAddress';
-//     const contractABI = [/* Your ABI */];
-    
-//     const contract = new ethers.Contract(contractAddress, contractABI, signer);
-//     const balance = await contract.balanceOf(userAddress);
-    
-//     // Convert from Wei to readable format
-//     setBalance(ethers.utils.formatEther(balance));
-//   } catch (error) {
-//     console.error('Failed to fetch balance:', error);
-//   }
-// };
 
   const startBot = async () => {
     try {
@@ -289,7 +269,8 @@ export default function Dashboard() {
         
         <header style={styles.header}>
           <div style={styles.headerLeft}>
-            <img src="seismic.svg" alt="" />
+            {/* <img src="seismic.svg" alt="" /> */}
+            <h1>TradeSafe</h1>
             <div style={styles.headerText}></div>
           </div>
           <div style={{display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap'}}>
