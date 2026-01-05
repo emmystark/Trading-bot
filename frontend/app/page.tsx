@@ -53,13 +53,17 @@ export default function Dashboard() {
     aiType: 'Free Technical Analysis'
   })
   
+  // Live server logs
+  const [logs, setLogs] = useState<any[]>([]);
+  const [sseConnected, setSseConnected] = useState<boolean>(false);
+  
   // New states for coin selection
   const [selectedCoin, setSelectedCoin] = useState<CoinOption>({ value: 'bitcoin', label: 'Bitcoin', symbol: 'BTC' })
   const [coinOptions, setCoinOptions] = useState<CoinOption[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [showDropdown, setShowDropdown] = useState(false)
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002'
 
   // Fetch dynamic list of coins from CoinGecko API
   const fetchCoins = async () => {
@@ -249,6 +253,94 @@ export default function Dashboard() {
       return () => clearInterval(interval)
     }
   }, [selectedCoin])
+
+  // Connect to server-sent events to receive live logs, market updates, and bot status
+  useEffect(() => {
+    let es: EventSource | null = null;
+
+    async function loadHistory() {
+      try {
+        const res = await fetch(`${API_URL}/api/logs`);
+        if (res.ok) {
+          const data = await res.json();
+          setLogs(data.logs ? data.logs.slice().reverse() : []);
+        }
+      } catch (e) {
+        console.error('Failed to fetch log history', e);
+      }
+    }
+
+    loadHistory();
+
+    try {
+      es = new EventSource(`${API_URL}/api/events`);
+
+      es.addEventListener('history', (e: any) => {
+        try {
+          const items = JSON.parse(e.data);
+          setLogs(prev => [...items.reverse(), ...prev].slice(0, 200));
+        } catch (err) { console.error(err) }
+      });
+
+      // Market update event (price, sentiment, chart)
+      es.addEventListener('market-update', (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          
+          // Update price and change
+          if (data.coin) {
+            setCoinPrice(data.coin.current_price);
+            setCoinChange(data.coin.price_change_percentage_24h);
+          }
+          
+          // Update sentiment/confidence
+          if (data.analysis) {
+            setSignal(data.analysis.signal);
+            setSentiment(data.analysis.confidence);
+          }
+          
+          // Update chart data
+          if (data.chart && data.chart.prices) {
+            const formattedChart = data.chart.prices.map((p: any) => ({
+              time: new Date(p[0]).getHours() + ':00',
+              price: p[1]
+            }));
+            setChartData(formattedChart);
+          }
+        } catch (err) { console.error('market-update parse error', err) }
+      });
+
+      // Bot status event
+      es.addEventListener('bot-status', (e: MessageEvent) => {
+        try {
+          const status = JSON.parse(e.data);
+          setBotStatus(status);
+        } catch (err) { console.error('bot-status parse error', err) }
+      });
+
+      // Default message handler for logs
+      es.onmessage = (e: MessageEvent) => {
+        try {
+          const entry = JSON.parse(e.data);
+          setLogs(prev => [entry, ...prev].slice(0, 200));
+        } catch (err) { /* ignore parsing errors */ }
+      };
+
+      es.onopen = () => setSseConnected(true);
+      es.onerror = (err) => {
+        console.error('SSE connection error', err);
+        setSseConnected(false);
+        if (es) {
+          es.close();
+          es = null;
+        }
+      };
+    } catch (err) {
+      console.error('EventSource not supported or failed', err);
+    }
+
+    return () => { if (es) es.close(); };
+  }, []);
 
   const filteredCoins = coinOptions.filter(coin => 
     coin.label.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -513,6 +605,29 @@ export default function Dashboard() {
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+
+        <div style={styles.activityFeed} className="card-hover">
+          <div style={styles.activityHeader}>
+            <h3 style={styles.cardTitle}>Activity Feed</h3>
+            <div style={{fontSize: '0.9rem', color: '#cbd5e1'}}>{sseConnected ? '● Live' : '○ Offline'}</div>
+          </div>
+
+          <div style={styles.feedList}>
+            {logs.length === 0 ? (
+              <div style={styles.noData}>No activity yet</div>
+            ) : (
+              logs.slice(0, 50).map((l) => (
+                <div key={l.id} style={styles.logItem} className="log-item">
+                  <div style={{...styles.logBadge, background: l.level === 'error' ? '#ef4444' : '#6ee7b7'}}></div>
+                  <div style={styles.logContent}>
+                    <div style={styles.logMessage}>{l.message}</div>
+                    <div style={styles.logMeta}>{new Date(l.timestamp).toLocaleString()}</div>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>
@@ -797,6 +912,49 @@ const styles = {
     fontWeight: 'bold',
     color: '#383838',
     margin: 0,
+  },
+  activityFeed: {
+    marginTop: '1.5rem',
+    background: 'rgba(255, 255, 255, 0.06)',
+    padding: '1.25rem',
+    borderRadius: '16px',
+    border: '1px solid rgba(255,255,255,0.08)'
+  },
+  activityHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: '0.75rem'
+  },
+  feedList: {
+    maxHeight: '320px',
+    overflowY: 'auto' as const,
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: '0.5rem'
+  },
+  logItem: {
+    display: 'flex',
+    gap: '0.75rem',
+    alignItems: 'flex-start'
+  },
+  logBadge: {
+    width: '10px',
+    height: '10px',
+    borderRadius: '50%',
+    marginTop: '6px'
+  },
+  logContent: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+  },
+  logMessage: {
+    color: '#fff',
+    fontSize: '0.95rem'
+  },
+  logMeta: {
+    fontSize: '0.8rem',
+    color: 'rgba(255,255,255,0.6)'
   },
   priceContainer: {
     display: 'flex',

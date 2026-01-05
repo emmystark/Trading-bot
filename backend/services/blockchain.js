@@ -3,6 +3,7 @@
 
 const { ethers } = require('ethers');
 require('dotenv').config();
+const contractABI = require('../../contracts/PrivateTradingBot.json');
 
 /**
  * ====================================================================================
@@ -56,7 +57,7 @@ class BlockchainService {
      * Tells ethers.js what functions exist and their parameters
      * Like: GraphQL schema or OpenAPI spec
      */
-    this.contractABI = require('../contracts/PrivateTradingBot.json').abi;
+    this.contractABI = contractABI.abi || contractABI;
     
     // Initialize connections (happens in constructor)
     this._initializeProvider();

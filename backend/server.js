@@ -7,10 +7,36 @@ const axios = require('axios');
 require('dotenv').config();
 
 // Import services
-const blockchainService = require('./services/blockchain');
+let blockchainService = null;
+let blockchainError = null;
+
+try {
+  blockchainService = require('./services/blockchain');
+} catch (error) {
+  console.error('⚠️ Blockchain service failed to initialize:', error.message);
+  blockchainError = error;
+  // Continue running server even if blockchain fails
+}
+
 const aiStrategy = require('./services/aiStrategy');
 
 const app = express();
+
+// ==================== BLOCKCHAIN SERVICE HELPER ====================
+
+/**
+ * Middleware to check if blockchain service is available
+ */
+function requireBlockchainService(req, res, next) {
+  if (!blockchainService) {
+    return res.status(503).json({
+      success: false,
+      error: 'Blockchain service unavailable',
+      details: blockchainError?.message || 'Unknown error'
+    });
+  }
+  next();
+}
 
 // ==================== MIDDLEWARE ====================
 
@@ -21,6 +47,91 @@ app.use(express.json());
 app.use((req, res, next) => {
   console.log(`\n📥 ${req.method} ${req.path}`);
   next();
+});
+
+// Simple in-memory log buffer + SSE clients
+const sseClients = new Set();
+const LOG_MAX = 200;
+const recentLogs = [];
+
+function addLog(level, message, meta) {
+  const entry = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2,8)}`,
+    level,
+    message: typeof message === 'string' ? message : JSON.stringify(message),
+    meta: meta || null,
+    timestamp: new Date().toISOString()
+  };
+
+  recentLogs.push(entry);
+  if (recentLogs.length > LOG_MAX) recentLogs.shift();
+
+  // Broadcast to SSE clients
+  const payload = `data: ${JSON.stringify(entry)}\n\n`;
+  for (const res of sseClients) {
+    try {
+      res.write(payload);
+    } catch (e) {
+      sseClients.delete(res);
+    }
+  }
+}
+
+// Bot status object (exposed by /api/bot/status)
+const botStatus = {
+  isActive: false,
+  dailyTradeCount: 0,
+  activePositions: 0,
+  aiType: 'Free Technical Analysis',
+  currentCoin: null,
+  lastUpdate: null
+};
+
+// Helper to broadcast market/bot updates via SSE
+function broadcastUpdate(eventType, data) {
+  const payload = `event: ${eventType}\\ndata: ${JSON.stringify(data)}\\n\\n`;
+  for (const res of sseClients) {
+    try {
+      res.write(payload);
+    } catch (e) {
+      sseClients.delete(res);
+    }
+  }
+}
+
+// Monkey-patch console so all logs flow through addLog as well
+const originalConsoleLog = console.log.bind(console);
+const originalConsoleError = console.error.bind(console);
+console.log = (...args) => {
+  originalConsoleLog(...args);
+  try { addLog('info', args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')); } catch (e) {}
+};
+console.error = (...args) => {
+  originalConsoleError(...args);
+  try { addLog('error', args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')); } catch (e) {}
+};
+
+// SSE endpoint for live server logs / events
+app.get('/api/events', (req, res) => {
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*'
+  });
+  res.flushHeaders?.();
+
+  // Welcome + send recent history
+  res.write(`event: welcome\ndata: ${JSON.stringify({ message: 'connected', now: new Date().toISOString() })}\n\n`);
+  res.write(`event: history\ndata: ${JSON.stringify(recentLogs)}\n\n`);
+
+  sseClients.add(res);
+  req.on('close', () => sseClients.delete(res));
+});
+
+// Simple logs history endpoint
+app.get('/api/logs', (req, res) => {
+  res.json({ success: true, logs: recentLogs });
 });
 
 // ==================== CACHE SYSTEM ====================
@@ -326,6 +437,32 @@ app.get('/api/market/:coinId', async (req, res) => {
         timestamp: Date.now()
       }
     });
+    
+    // Broadcast market update via SSE
+    broadcastUpdate('market-update', {
+      coin: {
+        id: coin.id,
+        name: coin.name,
+        symbol: coin.symbol,
+        current_price: coin.current_price,
+        price_change_percentage_24h: coin.price_change_percentage_24h,
+        market_cap: coin.market_cap,
+        total_volume: coin.total_volume
+      },
+      chart: {
+        prices: coin.sparkline_in_7d.price.slice(-24).map((price, i) => [
+          Date.now() - (24 - i) * 3600000,
+          price
+        ])
+      },
+      analysis: {
+        signal: analysis.signal,
+        confidence: analysis.confidence,
+        reasoning: analysis.reasoning,
+        positionSize: analysis.positionSize
+      },
+      timestamp: Date.now()
+    });
   } catch (error) {
     console.error('❌ Market data error:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -372,7 +509,7 @@ app.get('/api/analysis/:coinId', async (req, res) => {
  * GET /api/blockchain/balance
  * Get user's private balance from smart contract
  */
-app.get('/api/blockchain/balance', async (req, res) => {
+app.get('/api/blockchain/balance', requireBlockchainService, async (req, res) => {
   try {
     const userAddress = req.query.address || blockchainService.wallet.address;
     const balance = await blockchainService.getBalance(userAddress);
@@ -392,7 +529,7 @@ app.get('/api/blockchain/balance', async (req, res) => {
  * GET /api/blockchain/trades
  * Get user's trade history from smart contract
  */
-app.get('/api/blockchain/trades', async (req, res) => {
+app.get('/api/blockchain/trades', requireBlockchainService, async (req, res) => {
   try {
     const userAddress = req.query.address || blockchainService.wallet.address;
     const trades = await blockchainService.getTradeHistory(userAddress);
@@ -411,7 +548,7 @@ app.get('/api/blockchain/trades', async (req, res) => {
  * GET /api/blockchain/positions
  * Get user's open positions from smart contract
  */
-app.get('/api/blockchain/positions', async (req, res) => {
+app.get('/api/blockchain/positions', requireBlockchainService, async (req, res) => {
   try {
     const userAddress = req.query.address || blockchainService.wallet.address;
     const positions = await blockchainService.getOpenPositions(userAddress);
@@ -430,7 +567,7 @@ app.get('/api/blockchain/positions', async (req, res) => {
  * POST /api/blockchain/deposit
  * Deposit funds into smart contract
  */
-app.post('/api/blockchain/deposit', async (req, res) => {
+app.post('/api/blockchain/deposit', requireBlockchainService, async (req, res) => {
   try {
     const { amount } = req.body;
     
@@ -458,7 +595,7 @@ app.post('/api/blockchain/deposit', async (req, res) => {
  * POST /api/blockchain/withdraw
  * Withdraw funds from smart contract
  */
-app.post('/api/blockchain/withdraw', async (req, res) => {
+app.post('/api/blockchain/withdraw', requireBlockchainService, async (req, res) => {
   try {
     const { amount } = req.body;
     
@@ -486,7 +623,7 @@ app.post('/api/blockchain/withdraw', async (req, res) => {
  * POST /api/blockchain/trade
  * Execute a trade on the blockchain
  */
-app.post('/api/blockchain/trade', async (req, res) => {
+app.post('/api/blockchain/trade', requireBlockchainService, async (req, res) => {
   try {
     const { amount, price, isBuy, coinId } = req.body;
     
@@ -516,7 +653,7 @@ app.post('/api/blockchain/trade', async (req, res) => {
  * POST /api/blockchain/configure
  * Configure bot settings
  */
-app.post('/api/blockchain/configure', async (req, res) => {
+app.post('/api/blockchain/configure', requireBlockchainService, async (req, res) => {
   try {
     const config = req.body;
     
@@ -539,9 +676,20 @@ app.post('/api/blockchain/configure', async (req, res) => {
 app.post('/api/bot/start', async (req, res) => {
   try {
     const { coinId } = req.body;
-    
-    console.log(`\n🚀 Starting trading bot for ${coinId || 'all coins'}...`);
-    
+
+    // prevent duplicate intervals
+    if (global.tradingInterval) {
+      console.log('⚠️ Trading bot already running - restarting interval');
+      clearInterval(global.tradingInterval);
+      global.tradingInterval = null;
+    }
+
+    botStatus.isActive = true;
+    botStatus.lastStartedAt = new Date().toISOString();
+    botStatus.currentCoin = coinId || 'all';
+    addLog('info', `Trading bot started for ${coinId || 'all coins'}`);
+    broadcastUpdate('bot-status', botStatus);
+
     // Start trading loop (1-minute intervals)
     global.tradingInterval = setInterval(async () => {
       try {
@@ -549,42 +697,64 @@ app.post('/api/bot/start', async (req, res) => {
         const targetCoin = coinId 
           ? coins.find(c => c.id === coinId)
           : coins[0]; // Default to first coin
-        
+
         if (!targetCoin) {
           console.error('❌ Coin not found');
           return;
         }
-        
+
         // Analyze market
         const analysis = await aiStrategy.analyzeMarket(
           targetCoin,
           targetCoin.sparkline_in_7d.price,
           MOCK_NEWS
         );
-        
+
         console.log(`\n⏰ [${new Date().toLocaleTimeString()}] Trading Check`);
         console.log(`📊 ${targetCoin.name}: $${targetCoin.current_price.toFixed(2)}`);
         console.log(`📈 Signal: ${analysis.signal} (${(analysis.confidence * 100).toFixed(1)}%)`);
-        
-        // Execute trade if confidence is high enough
+
+        // Broadcast market update via SSE
+        broadcastUpdate('market-update', {
+          coin: {
+            id: targetCoin.id,
+            name: targetCoin.name,
+            symbol: targetCoin.symbol,
+            current_price: targetCoin.current_price,
+            price_change_percentage_24h: targetCoin.price_change_percentage_24h,
+            market_cap: targetCoin.market_cap,
+            total_volume: targetCoin.total_volume
+          },
+          chart: {
+            prices: targetCoin.sparkline_in_7d.price.slice(-24).map((price, i) => [
+              Date.now() - (24 - i) * 3600000,
+              price
+            ])
+          },
+          analysis: {
+            signal: analysis.signal,
+            confidence: analysis.confidence,
+            reasoning: analysis.reasoning,
+            positionSize: analysis.positionSize
+          },
+          timestamp: Date.now()
+        });
+
+        // Update a simple status estimate
         if (analysis.signal !== 'HOLD' && analysis.confidence > 0.7) {
           console.log(`✅ Would execute ${analysis.signal} trade!`);
           console.log(`💡 ${analysis.reasoning}`);
-          
-          // Uncomment to actually execute trades:
-          // await blockchainService.executeTrade({
-          //   amount: "0.01",
-          //   price: targetCoin.current_price.toString(),
-          //   isBuy: analysis.signal === 'BUY',
-          //   coinId: 0
-          // });
+          botStatus.dailyTradeCount = (botStatus.dailyTradeCount || 0) + 1;
+          botStatus.activePositions = Math.min(5, (botStatus.activePositions || 0) + 1);
+          botStatus.lastUpdate = new Date().toISOString();
+          broadcastUpdate('bot-status', botStatus);
         }
-        
+
       } catch (error) {
         console.error('❌ Trading loop error:', error);
       }
     }, 60000); // 1 minute
-    
+
     res.json({
       success: true,
       message: 'Trading bot started (1-minute intervals)',
@@ -604,7 +774,11 @@ app.post('/api/bot/stop', (req, res) => {
   if (global.tradingInterval) {
     clearInterval(global.tradingInterval);
     global.tradingInterval = null;
-    
+    botStatus.isActive = false;
+    botStatus.lastUpdate = new Date().toISOString();
+    addLog('info', 'Trading bot stopped');
+    broadcastUpdate('bot-status', botStatus);
+
     res.json({
       success: true,
       message: 'Trading bot stopped'
@@ -615,6 +789,14 @@ app.post('/api/bot/stop', (req, res) => {
       message: 'Bot is not running'
     });
   }
+});
+
+/**
+ * GET /api/bot/status
+ * Return the current bot status for frontend
+ */
+app.get('/api/bot/status', (req, res) => {
+  res.json(botStatus);
 });
 
 /**
@@ -654,14 +836,14 @@ app.listen(PORT, () => {
   console.log(`📝 Contract: ${process.env.TRADING_CONTRACT_ADDRESS || 'Not deployed yet'}\n`);
   
   // Listen to blockchain events
-  if (process.env.TRADING_CONTRACT_ADDRESS) {
-    blockchainService.listenToTradeEvents((event) => {
-      console.log(`\n🔔 Trade event detected on blockchain!`);
-      console.log(`   User: ${event.user}`);
-      console.log(`   Type: ${event.isBuy ? 'BUY' : 'SELL'}`);
-      // Send notification, update UI, etc.
-    });
-  }
+  // if (blockchainService && process.env.TRADING_CONTRACT_ADDRESS) {
+  //   blockchainService.listenToTradeEvents((event) => {
+  //     console.log(`\n🔔 Trade event detected on blockchain!`);
+  //     console.log(`   User: ${event.user}`);
+  //     console.log(`   Type: ${event.isBuy ? 'BUY' : 'SELL'}`);
+  //     // Send notification, update UI, etc.
+  //   });
+  // }
 });
 
 // Graceful shutdown
