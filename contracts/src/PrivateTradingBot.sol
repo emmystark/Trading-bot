@@ -1,62 +1,39 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.13;
 
-/**
- * @title PrivateTradingBot
- * @notice Smart contract for private cryptocurrency trading on Seismic blockchain
- * @dev Uses Seismic's shielded types (suint256, sbool, saddress) for privacy
- * 
- * FILE: contracts/PrivateTradingBot.sol
- * 
- * COMPILE WITH: sforge (NOT regular forge!)
- * 
- * IMPORTANT SETUP:
- * 1. Install Seismic Foundry: curl -L https://api.github.com/repos/SeismicSystems/seismic-foundry/contents/sfoundryup/install?ref=seismic | bash
- * 2. Run: sfoundryup
- * 3. Compile: sforge build
- * 4. Test: sforge test
- * 
- * SHIELDED TYPES (Seismic-specific):
- * - suint256 = shielded uint256 (encrypted on-chain)
- * - sbool = shielded boolean (encrypted true/false)
- * - saddress = shielded address (encrypted wallet address)
- * - suint8 = shielded uint8
- * - No imports needed - built into ssolc compiler!
- */
-
 contract PrivateTradingBot {
     
     // ==================== STRUCTS ====================
     
     struct Trade {
-        suint256 amount;        // PRIVATE: Trade size
-        suint256 price;         // PRIVATE: Entry price
-        sbool isBuy;            // PRIVATE: true = BUY, false = SELL
-        uint256 timestamp;      // PUBLIC: Block timestamp
-        suint8 coinId;          // PRIVATE: Coin identifier
+        uint256 amount;        // Trade size
+        uint256 price;         // Entry price
+        bool isBuy;            // true = BUY, false = SELL
+        uint256 timestamp;     // Block timestamp
+        uint8 coinId;          // Coin identifier
     }
     
     struct Position {
-        suint256 entryPrice;    // PRIVATE: Price when opened
-        suint256 amount;        // PRIVATE: Position size
-        suint256 stopLoss;      // PRIVATE: Stop-loss price
-        suint256 takeProfit;    // PRIVATE: Take-profit price
-        uint256 openedAt;       // PUBLIC: When position opened
-        sbool isActive;         // PRIVATE: Is position still open?
-        suint8 coinId;          // PRIVATE: Which coin
+        uint256 entryPrice;    // Price when opened
+        uint256 amount;        // Position size
+        uint256 stopLoss;      // Stop-loss price
+        uint256 takeProfit;    // Take-profit price
+        uint256 openedAt;      // When position opened
+        bool isActive;         // Is position still open?
+        uint8 coinId;          // Which coin
     }
     
     struct BotConfig {
-        suint256 maxPositionSize;   // PRIVATE: Max % per trade
-        suint256 dailyTradeLimit;   // PRIVATE: Max trades per day
-        sbool isActive;             // PRIVATE: Is bot currently trading?
-        suint256 minConfidence;     // PRIVATE: Min AI confidence (0-100)
+        uint256 maxPositionSize;   // Max % per trade
+        uint256 dailyTradeLimit;   // Max trades per day
+        bool isActive;             // Is bot currently trading?
+        uint256 minConfidence;     // Min AI confidence (0-100)
     }
     
     
     // ==================== STATE VARIABLES ====================
     
-    mapping(address => suint256) private balances;
+    mapping(address => uint256) private balances;
     mapping(address => Trade[]) private tradeHistory;
     mapping(address => Position[]) private openPositions;
     mapping(address => BotConfig) private botConfigs;
@@ -76,13 +53,24 @@ contract PrivateTradingBot {
         address indexed user,
         uint256 timestamp,
         bool isBuy,
-        uint8 coinId
+        uint8 coinId,
+        uint256 amount,
+        uint256 price
+    );
+    
+    event PositionOpened(
+        address indexed user,
+        uint256 timestamp,
+        uint8 coinId,
+        uint256 amount,
+        uint256 entryPrice
     );
     
     event PositionClosed(
         address indexed user,
         uint256 timestamp,
-        uint8 coinId
+        uint8 coinId,
+        int256 pnl
     );
     
     event BotConfigured(
@@ -92,11 +80,13 @@ contract PrivateTradingBot {
     
     event Deposit(
         address indexed user,
+        uint256 amount,
         uint256 timestamp
     );
     
     event Withdrawal(
         address indexed user,
+        uint256 amount,
         uint256 timestamp
     );
     
@@ -117,7 +107,7 @@ contract PrivateTradingBot {
         _resetDailyCounterIfNeeded();
         BotConfig memory config = botConfigs[msg.sender];
         require(
-            dailyTradeCount[msg.sender] < uint256(config.dailyTradeLimit),
+            dailyTradeCount[msg.sender] < config.dailyTradeLimit,
             "Daily trade limit reached"
         );
         _;
@@ -140,35 +130,32 @@ contract PrivateTradingBot {
     function deposit() external payable whenNotPaused {
         require(msg.value > 0, "Must deposit more than 0");
         
-        // Convert public ETH to private shielded balance
-        suint256 maskedAmount = suint256(msg.value);
-        
-        // Add to user's balance (encrypted)
-        balances[msg.sender] = balances[msg.sender] + maskedAmount;
+        // Add to user's balance
+        balances[msg.sender] += msg.value;
         
         // If first deposit, increment user counter
-        if (uint256(balances[msg.sender]) == msg.value) {
+        if (balances[msg.sender] == msg.value) {
             totalUsers++;
         }
         
-        emit Deposit(msg.sender, block.timestamp);
+        emit Deposit(msg.sender, msg.value, block.timestamp);
     }
     
     /**
      * @notice Withdraw funds from the bot
      */
     function withdraw(uint256 amount) external whenNotPaused {
-        suint256 currentBalance = balances[msg.sender];
-        require(uint256(currentBalance) >= amount, "Insufficient balance");
+        uint256 currentBalance = balances[msg.sender];
+        require(currentBalance >= amount, "Insufficient balance");
         
         // Reduce balance BEFORE sending (reentrancy protection)
-        balances[msg.sender] = suint256(uint256(currentBalance) - amount);
+        balances[msg.sender] = currentBalance - amount;
         
         // Send ETH to user
         (bool success, ) = msg.sender.call{value: amount}("");
         require(success, "Transfer failed");
         
-        emit Withdrawal(msg.sender, block.timestamp);
+        emit Withdrawal(msg.sender, amount, block.timestamp);
     }
     
     /**
@@ -181,33 +168,35 @@ contract PrivateTradingBot {
         uint8 coinId
     ) external whenNotPaused withinDailyLimit {
         BotConfig memory config = botConfigs[msg.sender];
-        require(bool(config.isActive), "Bot not active");
+        require(config.isActive, "Bot not active");
         
-        suint256 currentBalance = balances[msg.sender];
-        require(uint256(currentBalance) >= amount, "Insufficient balance");
+        uint256 currentBalance = balances[msg.sender];
         
-        // Create private trade record
+        // Calculate total cost including 0.1% fee
+        uint256 totalCost = amount + (amount / 1000);
+        require(currentBalance >= totalCost, "Insufficient balance");
+        
+        // Create trade record
         Trade memory newTrade = Trade({
-            amount: suint256(amount),
-            price: suint256(price),
-            isBuy: sbool(isBuy),
+            amount: amount,
+            price: price,
+            isBuy: isBuy,
             timestamp: block.timestamp,
-            coinId: suint8(coinId)
+            coinId: coinId
         });
         
-        // Add to trade history (encrypted)
+        // Add to trade history
         tradeHistory[msg.sender].push(newTrade);
         
         // Update balance (deduct cost + fees)
-        uint256 totalCost = amount + (amount / 1000); // 0.1% fee
-        balances[msg.sender] = suint256(uint256(currentBalance) - totalCost);
+        balances[msg.sender] = currentBalance - totalCost;
         
         // Increment counters
         dailyTradeCount[msg.sender]++;
         totalTrades++;
         
-        // Emit public event (no amounts)
-        emit TradeExecuted(msg.sender, block.timestamp, isBuy, coinId);
+        // Emit event
+        emit TradeExecuted(msg.sender, block.timestamp, isBuy, coinId, amount, price);
     }
     
     /**
@@ -221,33 +210,35 @@ contract PrivateTradingBot {
         uint8 coinId
     ) external whenNotPaused withinDailyLimit {
         BotConfig memory config = botConfigs[msg.sender];
-        require(bool(config.isActive), "Bot not active");
+        require(config.isActive, "Bot not active");
         
-        suint256 currentBalance = balances[msg.sender];
-        require(uint256(currentBalance) >= amount, "Insufficient balance");
+        uint256 currentBalance = balances[msg.sender];
+        require(currentBalance >= amount, "Insufficient balance");
         
         // Validate risk management parameters
         require(stopLoss < entryPrice, "Stop-loss must be below entry");
         require(takeProfit > entryPrice, "Take-profit must be above entry");
         
-        // Create position (all fields encrypted)
+        // Create position
         Position memory newPosition = Position({
-            entryPrice: suint256(entryPrice),
-            amount: suint256(amount),
-            stopLoss: suint256(stopLoss),
-            takeProfit: suint256(takeProfit),
+            entryPrice: entryPrice,
+            amount: amount,
+            stopLoss: stopLoss,
+            takeProfit: takeProfit,
             openedAt: block.timestamp,
-            isActive: sbool(true),
-            coinId: suint8(coinId)
+            isActive: true,
+            coinId: coinId
         });
         
         openPositions[msg.sender].push(newPosition);
         
         // Deduct from balance
-        balances[msg.sender] = suint256(uint256(currentBalance) - amount);
+        balances[msg.sender] = currentBalance - amount;
         
         dailyTradeCount[msg.sender]++;
         totalTrades++;
+        
+        emit PositionOpened(msg.sender, block.timestamp, coinId, amount, entryPrice);
     }
     
     /**
@@ -260,11 +251,11 @@ contract PrivateTradingBot {
         require(positionIndex < openPositions[msg.sender].length, "Invalid index");
         
         Position storage position = openPositions[msg.sender][positionIndex];
-        require(bool(position.isActive), "Position not active");
+        require(position.isActive, "Position not active");
         
         // Calculate profit/loss
-        uint256 entryPrice = uint256(position.entryPrice);
-        uint256 amount = uint256(position.amount);
+        uint256 entryPrice = position.entryPrice;
+        uint256 amount = position.amount;
         
         int256 pnl;
         if (currentPrice > entryPrice) {
@@ -277,13 +268,13 @@ contract PrivateTradingBot {
         
         // Return to balance (principal + profit/loss)
         uint256 returnAmount = uint256(int256(amount) + pnl);
-        suint256 currentBalance = balances[msg.sender];
-        balances[msg.sender] = suint256(uint256(currentBalance) + returnAmount);
+        uint256 currentBalance = balances[msg.sender];
+        balances[msg.sender] = currentBalance + returnAmount;
         
         // Mark position as closed
-        position.isActive = sbool(false);
+        position.isActive = false;
         
-        emit PositionClosed(msg.sender, block.timestamp, uint8(position.coinId));
+        emit PositionClosed(msg.sender, block.timestamp, position.coinId, pnl);
     }
     
     /**
@@ -297,12 +288,13 @@ contract PrivateTradingBot {
     ) external {
         require(maxPositionSize <= 100, "Max position size is 100%");
         require(minConfidence <= 100, "Min confidence is 100%");
+        require(dailyTradeLimit > 0, "Daily limit must be positive");
         
         botConfigs[msg.sender] = BotConfig({
-            maxPositionSize: suint256(maxPositionSize),
-            dailyTradeLimit: suint256(dailyTradeLimit),
-            isActive: sbool(isActive),
-            minConfidence: suint256(minConfidence)
+            maxPositionSize: maxPositionSize,
+            dailyTradeLimit: dailyTradeLimit,
+            isActive: isActive,
+            minConfidence: minConfidence
         });
         
         emit BotConfigured(msg.sender, block.timestamp);
@@ -311,26 +303,54 @@ contract PrivateTradingBot {
     
     // ==================== VIEW FUNCTIONS ====================
     
+    /**
+     * @notice Get user's balance
+     */
     function getBalance() external view returns (uint256) {
-        return uint256(balances[msg.sender]);
+        return balances[msg.sender];
     }
     
+    /**
+     * @notice Get user's trade history
+     */
     function getTradeHistory() external view returns (Trade[] memory) {
         return tradeHistory[msg.sender];
     }
     
+    /**
+     * @notice Get user's open positions
+     */
     function getOpenPositions() external view returns (Position[] memory) {
         return openPositions[msg.sender];
     }
     
+    /**
+     * @notice Get user's bot configuration
+     */
     function getBotConfig() external view returns (BotConfig memory) {
         return botConfigs[msg.sender];
     }
     
-    function getPublicStats() external view returns (uint256[3] memory stats) {
-        stats[0] = totalUsers;
-        stats[1] = totalTrades;
-        stats[2] = dailyTradeCount[msg.sender];
+    /**
+     * @notice Get public statistics
+     */
+    function getPublicStats() external view returns (
+        uint256 users,
+        uint256 trades,
+        uint256 userDailyTrades
+    ) {
+        return (
+            totalUsers,
+            totalTrades,
+            dailyTradeCount[msg.sender]
+        );
+    }
+    
+    /**
+     * @notice Get specific user balance (owner only for monitoring)
+     */
+    function getUserBalance(address user) external view onlyOwner returns (uint256) {
+        return balances[user];
     }
     
     
@@ -342,6 +362,15 @@ contract PrivateTradingBot {
     
     function unpause() external onlyOwner {
         isPaused = false;
+    }
+    
+    /**
+     * @notice Emergency withdraw (owner only, for contract upgrades)
+     */
+    function emergencyWithdraw() external onlyOwner {
+        uint256 balance = address(this).balance;
+        (bool success, ) = owner.call{value: balance}("");
+        require(success, "Emergency withdraw failed");
     }
     
     
@@ -356,192 +385,18 @@ contract PrivateTradingBot {
             lastTradeDate[msg.sender] = block.timestamp;
         }
     }
+    
+    
+    // ==================== FALLBACK ====================
+    
+    receive() external payable {
+        // Allow receiving ETH directly (treated as deposit)
+        balances[msg.sender] += msg.value;
+        
+        if (balances[msg.sender] == msg.value) {
+            totalUsers++;
+        }
+        
+        emit Deposit(msg.sender, msg.value, block.timestamp);
+    }
 }
-
-/**
- * ====================================================================================
- * SETUP INSTRUCTIONS (IMPORTANT!)
- * ====================================================================================
- * 
- * ❌ DO NOT USE: forge (regular Foundry)
- * ✅ USE: sforge (Seismic Foundry)
- * 
- * STEP 1: Install Seismic Foundry
- * ---------------------------------
- * 
- * # Install Rust (if not installed)
- * curl https://sh.rustup.rs -sSf | sh
- * source ~/.zshenv
- * 
- * # Install Seismic Foundry
- * curl -L \
- *   -H "Accept: application/vnd.github.v3.raw" \
- *   "https://api.github.com/repos/SeismicSystems/seismic-foundry/contents/sfoundryup/install?ref=seismic" | bash
- * 
- * source ~/.zshenv
- * 
- * # Install sforge, sanvil, ssolc (takes 5-20 minutes)
- * sfoundryup
- * source ~/.zshenv
- * 
- * # Verify installation
- * sforge --version
- * ssolc --version
- * 
- * 
- * STEP 2: Initialize Project
- * --------------------------
- * 
- * # Create new project
- * sforge init my-trading-bot
- * cd my-trading-bot
- * 
- * # Or in existing project
- * sforge clean  # Remove old artifacts
- * 
- * 
- * STEP 3: Save Contract
- * ---------------------
- * 
- * # Save this file as:
- * # src/PrivateTradingBot.sol
- * 
- * 
- * STEP 4: Compile
- * ---------------
- * 
- * sforge build
- * 
- * # Expected output:
- * # [⠊] Compiling...
- * # [⠒] Compiling 1 files with Ssolc 0.8.13
- * # [⠢] Ssolc 0.8.13 finished
- * # Compiler run successful!
- * 
- * 
- * STEP 5: Create Test File
- * -------------------------
- * 
- * Create test/PrivateTradingBot.t.sol:
- * 
-
- * pragma solidity ^0.8.13;
- * 
- * import {Test} from "forge-std/Test.sol";
- * import {PrivateTradingBot} from "../src/PrivateTradingBot.sol";
- * 
- * contract PrivateTradingBotTest is Test {
- *     PrivateTradingBot bot;
- *     address user = address(0x123);
- *     
- *     function setUp() public {
- *         bot = new PrivateTradingBot();
- *         vm.deal(user, 10 ether);
- *     }
- *     
- *     function testDeposit() public {
- *         vm.startPrank(user);
- *         bot.deposit{value: 1 ether}();
- *         assertEq(bot.getBalance(), 1 ether);
- *         vm.stopPrank();
- *     }
- *     
- *     function testExecuteTrade() public {
- *         vm.startPrank(user);
- *         
- *         // Deposit funds
- *         bot.deposit{value: 1 ether}();
- *         
- *         // Configure bot
- *         bot.configureBotSettings(30, 5, true, 70);
- *         
- *         // Execute trade
- *         bot.executeTrade(0.1 ether, 45000, true, 0);
- *         
- *         // Check trade was recorded
- *         assertEq(bot.getTradeHistory().length, 1);
- *         
- *         vm.stopPrank();
- *     }
- * }
- * 
- * 
- * STEP 6: Test
- * ------------
- * 
- * sforge test -vvv
- * 
- * # Expected output:
- * # Running 2 tests...
- * # [PASS] testDeposit() (gas: 123456)
- * # [PASS] testExecuteTrade() (gas: 234567)
- * # Test result: ok. 2 passed
- * 
- * 
- * STEP 7: Deploy to Seismic Testnet
- * ----------------------------------
- * 
- * # Create .env file:
- * SEISMIC_RPC_URL=https://testnet-rpc.seismic.systems
- * PRIVATE_KEY=0x...
- * 
- * # Deploy
- * source .env
- * sforge create PrivateTradingBot \
- *   --rpc-url $SEISMIC_RPC_URL \
- *   --private-key $PRIVATE_KEY
- * 
- * # Expected output:
- * # Deployer: 0x...
- * # Deployed to: 0xabcdef...  <- SAVE THIS ADDRESS
- * 
- * 
- * ====================================================================================
- * TROUBLESHOOTING
- * ====================================================================================
- * 
- * ERROR: "Identifier not found or not unique" for suint256
- * SOLUTION: You're using forge instead of sforge. Install Seismic Foundry!
- * 
- * ERROR: "command not found: sforge"
- * SOLUTION: Run sfoundryup and source ~/.zshenv
- * 
- * ERROR: "sfoundryup: command not found"
- * SOLUTION: Re-run the installation script from Step 1
- * 
- * ERROR: Compilation takes too long
- * SOLUTION: This is normal. First compilation can take 5-20 minutes.
- * 
- * ====================================================================================
- * KEY DIFFERENCES: SEISMIC vs ETHEREUM
- * ====================================================================================
- * 
- * ETHEREUM SOLIDITY          | SEISMIC SOLIDITY
- * ---------------------------|---------------------------
- * uint256 balance;           | suint256 balance;
- * bool isActive;             | sbool isActive;
- * address owner;             | saddress owner;
- * Compiler: solc             | Compiler: ssolc
- * Build tool: forge          | Build tool: sforge
- * Local node: anvil          | Local node: sanvil
- * Data: PUBLIC by default    | Data: PRIVATE with stypes
- * 
- * ====================================================================================
- * CASTING BETWEEN TYPES
- * ====================================================================================
- * 
- * // Public to Shielded (mask)
- * uint256 publicValue = 100;
- * suint256 shieldedValue = suint256(publicValue);
- * 
- * // Shielded to Public (unmask)
- * suint256 shieldedValue = suint256(100);
- * uint256 publicValue = uint256(shieldedValue);
- * 
- * // Direct construction
- * suint256 amount = suint256(msg.value);
- * sbool isActive = sbool(true);
- * suint8 coinId = suint8(0);
- * 
- * ====================================================================================
- */

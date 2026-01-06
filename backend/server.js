@@ -1,32 +1,26 @@
-// FILE: backend/server.js
-// PURPOSE: Main Express server with all routes and services integrated
-
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
 require('dotenv').config();
 
-// Import services
 let blockchainService = null;
 let blockchainError = null;
+
+
+
 
 try {
   blockchainService = require('./services/blockchain');
 } catch (error) {
-  console.error('⚠️ Blockchain service failed to initialize:', error.message);
+  console.error(' Blockchain service failed to initialize:', error.message);
   blockchainError = error;
-  // Continue running server even if blockchain fails
 }
 
 const aiStrategy = require('./services/aiStrategy');
 
 const app = express();
 
-// ==================== BLOCKCHAIN SERVICE HELPER ====================
 
-/**
- * Middleware to check if blockchain service is available
- */
 function requireBlockchainService(req, res, next) {
   if (!blockchainService) {
     return res.status(503).json({
@@ -38,14 +32,12 @@ function requireBlockchainService(req, res, next) {
   next();
 }
 
-// ==================== MIDDLEWARE ====================
 
 app.use(cors());
 app.use(express.json());
 
-// Request logging middleware
 app.use((req, res, next) => {
-  console.log(`\n📥 ${req.method} ${req.path}`);
+  console.log(`\n ${req.method} ${req.path}`);
   next();
 });
 
@@ -77,7 +69,6 @@ function addLog(level, message, meta) {
   }
 }
 
-// Bot status object (exposed by /api/bot/status)
 const botStatus = {
   isActive: false,
   dailyTradeCount: 0,
@@ -150,7 +141,7 @@ async function cachedFetch(key, fetchFunction, duration = CACHE_DURATION) {
   
   // Check for pending request
   if (pendingRequests.has(key)) {
-    console.log(`♻️ Reusing pending request: ${key}`);
+    console.log(` Reusing pending request: ${key}`);
     return await pendingRequests.get(key);
   }
   
@@ -158,7 +149,7 @@ async function cachedFetch(key, fetchFunction, duration = CACHE_DURATION) {
   if (cache.has(key)) {
     const cached = cache.get(key);
     if (now - cached.timestamp < duration) {
-      console.log(`💾 Cache hit: ${key}`);
+      console.log(` Cache hit: ${key}`);
       return cached.data;
     }
   }
@@ -181,7 +172,7 @@ async function cachedFetch(key, fetchFunction, duration = CACHE_DURATION) {
     } catch (error) {
       // Return stale cache on error
       if (cache.has(key)) {
-        console.log(`⚠️ Using stale cache: ${key}`);
+        console.log(` Using stale cache: ${key}`);
         return cache.get(key).data;
       }
       throw error;
@@ -232,7 +223,7 @@ async function fetchPricesFromMultipleSources() {
     try {
       return await source();
     } catch (error) {
-      console.log(`⚠️ Source failed, trying next...`);
+      console.log(` Source failed, trying next...`);
       continue;
     }
   }
@@ -376,7 +367,7 @@ app.get('/api/coins', async (req, res) => {
       }))
     });
   } catch (error) {
-    console.error('❌ Error fetching coins:', error);
+    console.error(' Error fetching coins:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -464,7 +455,7 @@ app.get('/api/market/:coinId', async (req, res) => {
       timestamp: Date.now()
     });
   } catch (error) {
-    console.error('❌ Market data error:', error);
+    console.error(' Market data error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -500,7 +491,7 @@ app.get('/api/analysis/:coinId', async (req, res) => {
       analysis
     });
   } catch (error) {
-    console.error('❌ Analysis error:', error);
+    console.error(' Analysis error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -520,7 +511,7 @@ app.get('/api/blockchain/balance', requireBlockchainService, async (req, res) =>
       address: userAddress
     });
   } catch (error) {
-    console.error('❌ Balance error:', error);
+    console.error(' Balance error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -539,7 +530,7 @@ app.get('/api/blockchain/trades', requireBlockchainService, async (req, res) => 
       trades
     });
   } catch (error) {
-    console.error('❌ Trades error:', error);
+    console.error(' Trades error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -558,7 +549,7 @@ app.get('/api/blockchain/positions', requireBlockchainService, async (req, res) 
       positions
     });
   } catch (error) {
-    console.error('❌ Positions error:', error);
+    console.error(' Positions error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -586,7 +577,7 @@ app.post('/api/blockchain/deposit', requireBlockchainService, async (req, res) =
       blockNumber: receipt.blockNumber
     });
   } catch (error) {
-    console.error('❌ Deposit error:', error);
+    console.error(' Deposit error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -614,7 +605,7 @@ app.post('/api/blockchain/withdraw', requireBlockchainService, async (req, res) 
       blockNumber: receipt.blockNumber
     });
   } catch (error) {
-    console.error('❌ Withdrawal error:', error);
+    console.error(' Withdrawal error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -644,7 +635,7 @@ app.post('/api/blockchain/trade', requireBlockchainService, async (req, res) => 
     
     res.json(result);
   } catch (error) {
-    console.error('❌ Trade error:', error);
+    console.error(' Trade error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -664,7 +655,7 @@ app.post('/api/blockchain/configure', requireBlockchainService, async (req, res)
       transactionHash: receipt.transactionHash
     });
   } catch (error) {
-    console.error('❌ Configuration error:', error);
+    console.error(' Configuration error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -679,7 +670,7 @@ app.post('/api/bot/start', async (req, res) => {
 
     // prevent duplicate intervals
     if (global.tradingInterval) {
-      console.log('⚠️ Trading bot already running - restarting interval');
+      console.log(' Trading bot already running - restarting interval');
       clearInterval(global.tradingInterval);
       global.tradingInterval = null;
     }
@@ -699,7 +690,7 @@ app.post('/api/bot/start', async (req, res) => {
           : coins[0]; // Default to first coin
 
         if (!targetCoin) {
-          console.error('❌ Coin not found');
+          console.error(' Coin not found');
           return;
         }
 
@@ -710,9 +701,9 @@ app.post('/api/bot/start', async (req, res) => {
           MOCK_NEWS
         );
 
-        console.log(`\n⏰ [${new Date().toLocaleTimeString()}] Trading Check`);
-        console.log(`📊 ${targetCoin.name}: $${targetCoin.current_price.toFixed(2)}`);
-        console.log(`📈 Signal: ${analysis.signal} (${(analysis.confidence * 100).toFixed(1)}%)`);
+        console.log(`\n [${new Date().toLocaleTimeString()}] Trading Check`);
+        console.log(` ${targetCoin.name}: $${targetCoin.current_price.toFixed(2)}`);
+        console.log(` Signal: ${analysis.signal} (${(analysis.confidence * 100).toFixed(1)}%)`);
 
         // Broadcast market update via SSE
         broadcastUpdate('market-update', {
@@ -742,8 +733,8 @@ app.post('/api/bot/start', async (req, res) => {
 
         // Update a simple status estimate
         if (analysis.signal !== 'HOLD' && analysis.confidence > 0.7) {
-          console.log(`✅ Would execute ${analysis.signal} trade!`);
-          console.log(`💡 ${analysis.reasoning}`);
+          console.log(` Would execute ${analysis.signal} trade!`);
+          console.log(` ${analysis.reasoning}`);
           botStatus.dailyTradeCount = (botStatus.dailyTradeCount || 0) + 1;
           botStatus.activePositions = Math.min(5, (botStatus.activePositions || 0) + 1);
           botStatus.lastUpdate = new Date().toISOString();
@@ -751,7 +742,7 @@ app.post('/api/bot/start', async (req, res) => {
         }
 
       } catch (error) {
-        console.error('❌ Trading loop error:', error);
+        console.error(' Trading loop error:', error);
       }
     }, 60000); // 1 minute
 
@@ -761,7 +752,7 @@ app.post('/api/bot/start', async (req, res) => {
       coinId: coinId || 'all'
     });
   } catch (error) {
-    console.error('❌ Bot start error:', error);
+    console.error(' Bot start error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -815,12 +806,12 @@ app.post('/api/cache/clear', (req, res) => {
 
 // ==================== START SERVER ====================
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 
 app.listen(PORT, () => {
-  console.log(`\n✅ Seismic Trading Bot Backend`);
-  console.log(`🌐 Server: http://localhost:${PORT}`);
-  console.log(`📊 API Sources: Binance → CryptoCompare → Mock`);
+  console.log(`\n Seismic Trading Bot Backend`);
+  console.log(` Server: http://localhost:${PORT}`);
+  console.log(` API Sources: Binance → CryptoCompare → Mock`);
   console.log(`⚡ Cache: ${CACHE_DURATION / 1000}s | Rate limit: ${MIN_API_INTERVAL}ms`);
   console.log(`\n🎯 Available Endpoints:`);
   console.log(`   GET  /api/health              - Health check`);
@@ -832,8 +823,8 @@ app.listen(PORT, () => {
   console.log(`   POST /api/blockchain/trade    - Execute trade`);
   console.log(`   POST /api/bot/start           - Start auto-trading`);
   console.log(`   POST /api/bot/stop            - Stop auto-trading`);
-  console.log(`\n🔐 Using Seismic: ${process.env.SEISMIC_RPC_URL || 'Not configured'}`);
-  console.log(`📝 Contract: ${process.env.TRADING_CONTRACT_ADDRESS || 'Not deployed yet'}\n`);
+  console.log(`\n Using Seismic: ${process.env.SEISMIC_RPC_URL || 'Not configured'}`);
+  console.log(` Contract: ${process.env.TRADING_CONTRACT_ADDRESS || 'Not deployed yet'}\n`);
   
   // Listen to blockchain events
   // if (blockchainService && process.env.TRADING_CONTRACT_ADDRESS) {
@@ -848,7 +839,7 @@ app.listen(PORT, () => {
 
 // Graceful shutdown
 process.on('SIGINT', () => {
-  console.log('\n🛑 Shutting down gracefully...');
+  console.log('\n Shutting down gracefully...');
   
   if (global.tradingInterval) {
     clearInterval(global.tradingInterval);

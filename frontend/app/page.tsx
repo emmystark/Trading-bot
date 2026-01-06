@@ -42,6 +42,8 @@ export default function Dashboard() {
   const [coinPrice, setCoinPrice] = useState<number>(0)
   const [coinChange, setCoinChange] = useState<number>(0)
   const [sentiment, setSentiment] = useState<number>(0)
+  const [reasoning, setReasoning] = useState<string>('Analyzing market...')
+  const [positionSize, setPositionSize] = useState<number>(0)
   const [news, setNews] = useState<{title: string, link: string}[]>([])
   const [loading, setLoading] = useState<boolean>(true)
   const [refreshing, setRefreshing] = useState<boolean>(false)
@@ -63,7 +65,7 @@ export default function Dashboard() {
   const [searchTerm, setSearchTerm] = useState('')
   const [showDropdown, setShowDropdown] = useState(false)
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002'
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
 
   // Fetch dynamic list of coins from CoinGecko API
   const fetchCoins = async () => {
@@ -113,134 +115,171 @@ export default function Dashboard() {
     }
   }
 
-  const fetchData = async () => {
-    try {
-      setRefreshing(true)
-      setError('')
-      console.log('Fetching data from:', API_URL, 'for coin:', selectedCoin.value)
+const fetchData = async () => {
+  try {
+    setRefreshing(true)
+    setError('')
+    console.log('Fetching data from:', API_URL, 'for coin:', selectedCoin.value)
 
-      // Fetch chart data for selected coin
-      await fetchChartData(selectedCoin.value)
+    // Fetch chart data for selected coin
+    await fetchChartData(selectedCoin.value)
 
-      const coinParam = `?coin=${selectedCoin.symbol}`
+    // UPDATED API ENDPOINTS - matching your backend
+    const [balanceRes, marketRes, botStatusRes, tradesRes] = await Promise.all([
+      // 1. Get balance from blockchain
+      fetch(`${API_URL}/api/blockchain/balance`).catch(e => {
+        console.error('Balance API error:', e)
+        return { ok: false, json: async () => ({ success: false, balance: '0' }) }
+      }),
+      
+      // 2. Get market data for selected coin
+      fetch(`${API_URL}/api/market/${selectedCoin.value}`).catch(e => {
+        console.error('Market API error:', e)
+        return { ok: false, json: async () => null }
+      }),
+      
+      // 3. Get bot status
+      fetch(`${API_URL}/api/bot/status`).catch(e => {
+        console.error('Status API error:', e)
+        return { ok: false, json: async () => null }
+      }),
+      
+      // 4. Get trade history from blockchain
+      fetch(`${API_URL}/api/blockchain/trades`).catch(e => {
+        console.error('Trades API error:', e)
+        return { ok: false, json: async () => ({ success: false, trades: [] }) }
+      })
+    ])
 
-      const [tradesRes, marketRes, botStatusRes, newsRes] = await Promise.all([
-        fetch(`${API_URL}/api/trades${coinParam}`).catch(e => {
-          console.error('Trades API error:', e)
-          return { ok: false, json: async () => [] }
-        }),
-        fetch(`${API_URL}/api/market${coinParam}`).catch(e => {
-          console.error('Market API error:', e)
-          return { ok: false, json: async () => null }
-        }),
-        fetch(`${API_URL}/api/bot/status${coinParam}`).catch(e => {
-          console.error('Status API error:', e)
-          return { ok: false, json: async () => null }
-        }),
-        // Fetch news for selected coin from CryptoCompare
-        fetch(`https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories=${selectedCoin.symbol}`).catch(e => {
-          console.error('Crypto news API error:', e)
-          return { ok: false, json: async () => ({ Data: [] }) }
-        })
-      ])
-
-      if (tradesRes.ok) {
-        const tradesData = await tradesRes.json()
-        setTrades(Array.isArray(tradesData) ? tradesData : [])
-        console.log('Trades loaded:', tradesData.length)
+    // Process balance
+    if (balanceRes.ok) {
+      const balanceData = await balanceRes.json()
+      if (balanceData.success) {
+        setBalance(parseFloat(balanceData.balance).toFixed(4))
+        console.log('Balance loaded:', balanceData.balance)
       }
+    }
 
-      if (marketRes.ok) {
-        const marketData: MarketData = await marketRes.json()
-        setSignal(marketData.signal || 'Hold')
-        setSentiment(marketData.sentiment || 0.5)
+    // Process market data
+    if (marketRes.ok) {
+      const marketData = await marketRes.json()
+      if (marketData.success) {
+        // Update signal and sentiment from AI analysis
+        setSignal(marketData.data.analysis.signal || 'Hold')
+        setSentiment(marketData.data.analysis.confidence || 0.5)
+        setReasoning(marketData.data.analysis.reasoning || 'Analyzing market...')
+        setPositionSize(marketData.data.analysis.positionSize || 0)
         
-        // Use CoinGecko data for price
-        const priceRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${selectedCoin.value}&vs_currencies=usd&include_24hr_change=true`)
-        if (priceRes.ok) {
-          const priceData = await priceRes.json()
-          setCoinPrice(priceData[selectedCoin.value]?.usd || 0)
-          setCoinChange(priceData[selectedCoin.value]?.usd_24h_change || 0)
-        }
+        // Update coin price
+        setCoinPrice(marketData.data.coin.current_price || 0)
+        setCoinChange(marketData.data.coin.price_change_percentage_24h || 0)
+        
+        console.log('Market data loaded:', marketData.data.coin.name)
       }
+    }
 
-      if (botStatusRes.ok) {
-        const statusData = await botStatusRes.json()
-        setBotStatus(statusData)
-        console.log('Bot status:', statusData)
+    // Process bot status
+    if (botStatusRes.ok) {
+      const statusData = await botStatusRes.json()
+      setBotStatus({
+        isActive: statusData.isActive || false,
+        dailyTradeCount: statusData.dailyTradeCount || 0,
+        activePositions: statusData.activePositions || 0,
+        aiType: statusData.aiType || 'Free Technical Analysis'
+      })
+      console.log('Bot status:', statusData)
+    }
+
+    // Process trades
+    if (tradesRes.ok) {
+      const tradesData = await tradesRes.json()
+      if (tradesData.success && Array.isArray(tradesData.trades)) {
+        // Format trades for display
+        const formattedTrades = tradesData.trades.map((trade: any, index: number) => ({
+          id: `T${index + 1}`,
+          asset: selectedCoin.symbol,
+          entry: parseFloat(trade.price).toFixed(2),
+          exit: trade.exit ? parseFloat(trade.exit).toFixed(2) : null,
+          pnl: trade.pnl || 0,
+          status: trade.isActive ? 'Active' : 'Closed',
+          timestamp: new Date(trade.timestamp * 1000).toISOString()
+        }))
+        setTrades(formattedTrades)
+        console.log('Trades loaded:', formattedTrades.length)
       }
+    }
 
+    // Fetch crypto news
+    try {
+      const newsRes = await fetch(
+        `https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories=${selectedCoin.symbol}`
+      )
       if (newsRes.ok) {
         const newsData = await newsRes.json()
         setNews(newsData.Data.slice(0, 4).map((article: any) => ({
           title: article.title,
           link: article.url
         })))
-        console.log('Crypto news loaded:', newsData.Data.length)
       }
-
-      // Mock balance - replace with actual contract balance fetch
-      // Example: const balance = await contract.balanceOf(userAddress)
-      setBalance('1.2547')
-      console.log('All data loaded successfully!')
     } catch (err) {
-      console.error('Fetch error:', err)
-      setError('Failed to connect to backend. Make sure the server is running on port 3001.')
-    } finally {
-      setLoading(false)
-      setRefreshing(false)
+      console.error('News API error:', err)
     }
+
+    console.log('All data loaded successfully!')
+  } catch (err) {
+    console.error('Fetch error:', err)
+    setError('Failed to connect to backend. Make sure the server is running on port 3001.')
+  } finally {
+    setLoading(false)
+    setRefreshing(false)
   }
+}
 
 
-  const startBot = async () => {
-    try {
-      const response = await fetch(`${API_URL}/api/bot/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userAddress: '0xYourAddress', // Replace with actual wallet address
-          privateKey: process.env.NEXT_PUBLIC_BOT_PRIVATE_KEY,
-          coin: selectedCoin.symbol,
-          coinId: selectedCoin.value
-        })
+ const startBot = async () => {
+  try {
+    const response = await fetch(`${API_URL}/api/bot/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        coinId: selectedCoin.value
       })
-      if (response.ok) {
-        const data = await response.json()
-        alert(data.message)
-        fetchData()
-      } else {
-        const errorData = await response.json()
-        alert(`Failed to start bot: ${errorData.message || 'Unknown error'}`)
-      }
-    } catch (err) {
-      console.error('Start bot error:', err)
-      alert('Failed to start bot. Check backend connection.')
+    })
+    
+    if (response.ok) {
+      const data = await response.json()
+      alert(data.message || 'Bot started successfully!')
+      fetchData()
+    } else {
+      const errorData = await response.json()
+      alert(`Failed to start bot: ${errorData.error || 'Unknown error'}`)
     }
+  } catch (err) {
+    console.error('Start bot error:', err)
+    alert('Failed to start bot. Check backend connection.')
   }
+}
 
-  const stopBot = async () => {
-    try {
-      const response = await fetch(`${API_URL}/api/bot/stop`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          coin: selectedCoin.symbol
-        })
-      })
-      if (response.ok) {
-        const data = await response.json()
-        alert(data.message)
-        fetchData()
-      } else {
-        const errorData = await response.json()
-        alert(`Failed to stop bot: ${errorData.message || 'Unknown error'}`)
-      }
-    } catch (err) {
-      console.error('Stop bot error:', err)
-      alert('Failed to stop bot. Check backend connection.')
+const stopBot = async () => {
+  try {
+    const response = await fetch(`${API_URL}/api/bot/stop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    })
+    
+    if (response.ok) {
+      const data = await response.json()
+      alert(data.message || 'Bot stopped successfully!')
+      fetchData()
+    } else {
+      const errorData = await response.json()
+      alert(`Failed to stop bot: ${errorData.error || 'Unknown error'}`)
     }
+  } catch (err) {
+    console.error('Stop bot error:', err)
+    alert('Failed to stop bot. Check backend connection.')
   }
+}
 
   useEffect(() => {
     fetchCoins()
@@ -293,10 +332,12 @@ export default function Dashboard() {
             setCoinChange(data.coin.price_change_percentage_24h);
           }
           
-          // Update sentiment/confidence
+          // Update sentiment/confidence and reasoning
           if (data.analysis) {
             setSignal(data.analysis.signal);
             setSentiment(data.analysis.confidence);
+            setReasoning(data.analysis.reasoning || 'Analyzing market...');
+            setPositionSize(data.analysis.positionSize || 0);
           }
           
           // Update chart data
@@ -448,7 +489,10 @@ export default function Dashboard() {
             <h2 style={styles.signalTitle}>AI SIGNAL: {signal}</h2>
           </div>
           <p style={styles.signalConfidence}>
-            Confidence: {(sentiment * 100).toFixed(0)}% • Daily Trades: {botStatus.dailyTradeCount}/2
+            Confidence: {(sentiment * 100).toFixed(1)}% • Position Size: {positionSize.toFixed(1)}% • Daily Trades: {botStatus.dailyTradeCount}/2
+          </p>
+          <p style={{...styles.signalConfidence, marginTop: '0.75rem', fontSize: '1rem', fontStyle: 'italic', opacity: 0.95}}>
+            {reasoning}
           </p>
         </div>
 
@@ -634,7 +678,6 @@ export default function Dashboard() {
     </div>
   )
 }
-
 
 
 
