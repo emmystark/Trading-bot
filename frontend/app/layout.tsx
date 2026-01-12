@@ -1,6 +1,6 @@
 // frontend/app/layout.tsx
 import type { Metadata } from 'next'
-import FontAwesomeProvider from './components/FontAwesomeProvider'
+import FontAwesomeProvider from '@/components/FontAwesomeProvider'
 
 export const metadata: Metadata = {
   title: 'Seismic Trading Bot',

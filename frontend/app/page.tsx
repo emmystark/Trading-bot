@@ -2,7 +2,8 @@
 import { Zap } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { ethers } from 'ethers';
+import { ethers } from 'ethers'
+import LiveDashboard from '@/components/LiveDashboard';
 
 
 
@@ -393,18 +394,12 @@ const stopBot = async () => {
   return (
     <div style={styles.pageWrapper}>
       <style>{cssStyles}</style>
+      
+      {/* Legacy header kept for controls */}
       <div style={styles.container}>
-        {error && (
-          <div style={styles.errorBanner}>
-             {error}
-          </div>
-        )}
-        
         <header style={styles.header}>
           <div style={styles.headerLeft}>
-            {/* <img src="seismic.svg" alt="" /> */}
             <h1>TradeSafe</h1>
-            <div style={styles.headerText}></div>
           </div>
           <div style={{display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap'}}>
             {/* Custom Searchable Dropdown */}
@@ -477,204 +472,15 @@ const stopBot = async () => {
             )}
           </div>
         </header>
-
-        <div style={{
-          ...styles.signalBanner,
-          background: signal === 'BUY' ? 'linear-gradient(135deg, #10b981, #059669)' :
-          signal === 'SELL' ? 'linear-gradient(135deg, #ef4444, #dc2626)' :
-          'linear-gradient(135deg, #3b82f6, #2563eb)'
-        }} className="signal-banner">
-          <div style={styles.signalContent}>
-            <span style={styles.pulseIndicator}>●</span>
-            <h2 style={styles.signalTitle}>AI SIGNAL: {signal}</h2>
-          </div>
-          <p style={styles.signalConfidence}>
-            Confidence: {(sentiment * 100).toFixed(1)}% • Position Size: {positionSize.toFixed(1)}% • Daily Trades: {botStatus.dailyTradeCount}/2
-          </p>
-          <p style={{...styles.signalConfidence, marginTop: '0.75rem', fontSize: '1rem', fontStyle: 'italic', opacity: 0.95}}>
-            {reasoning}
-          </p>
-        </div>
-
-        <div style={styles.statsGrid}>
-          <div style={styles.statCard} className="card-hover">
-            <div style={styles.statHeader}>
-              <span style={styles.statIcon}>Balance</span>
-              <div style={styles.iconBadge}>
-                <span style={styles.trendUp}>↗</span>
-              </div>
-            </div>
-            <p style={styles.statLabel}></p>
-            <h3 style={styles.statValue}>${balance}</h3>
-          </div>
-          <div style={styles.statCard} className="card-hover">
-            <div style={styles.statHeader}>
-              <span style={styles.statIcon}>Active Trades</span>
-              <div style={styles.iconBadge}>
-                <span style={{...styles.activeDot, backgroundColor: botStatus.activePositions > 0 ? '#10b981' : '#64748b'}}></span>
-              </div>
-            </div>
-            <p style={styles.statLabel}></p>
-            <h3 style={styles.statValue}>{botStatus.activePositions}</h3>
-          </div>
-          <div style={styles.statCard} className="card-hover">
-            <div style={styles.statHeader}>
-              <span style={styles.statIcon}>{selectedCoin.symbol} Price</span>
-              <span style={{...styles.trendIndicator, color: coinChange > 0 ? '#6ee7b7' : '#fca5a5'}}>
-                {coinChange > 0 ? '↗' : '↘'}
-              </span>
-            </div>
-            <p style={styles.statLabel}></p>
-            <div style={styles.priceContainer}>
-              <h3 style={styles.statValue}>${coinPrice.toLocaleString()}</h3>
-              <span style={{...styles.priceChange, color: coinChange > 0 ? '#6ee7b7' : '#fca5a5'}}>
-                {coinChange > 0 ? '+' : ''}{coinChange.toFixed(2)}%
-              </span>
-            </div>
-          </div>
-          <div style={styles.statCard} className="card-hover">
-            <div style={styles.statHeader}>
-              <span style={styles.statIcon}>AI Sentiment</span>
-              <div style={styles.aiBadge}>FREE</div>
-            </div>
-            <p style={styles.statLabel}></p>
-            <div style={styles.sentimentContainer}>
-              <h3 style={styles.statValue}>{(sentiment * 100).toFixed(0)}%</h3>
-              <div style={styles.progressBar}>
-                <div style={{...styles.progressFill, width: `${sentiment * 100}%`}}></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div style={styles.contentGrid}>
-          <div style={styles.chartCard} className="card-hover">
-            <h3 style={styles.cardTitle}>{selectedCoin.symbol} 24hr Chart</h3>
-            <div style={styles.chartContainer}>
-              {chartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                    <XAxis dataKey="time" stroke="rgba(255,255,255,0.7)" style={{fontSize: '12px'}} />
-                    <YAxis stroke="rgba(255,255,255,0.7)" style={{fontSize: '12px'}} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: 'rgba(109, 87, 112, 0.95)',
-                        border: '1px solid rgba(255,255,255,0.2)',
-                        borderRadius: '12px',
-                        backdropFilter: 'blur(10px)',
-                        padding: '12px'
-                      }}
-                      labelStyle={{ color: '#fff', fontWeight: 'bold' }}
-                      formatter={(value: number) => [`$${value.toLocaleString()}`, 'Price']}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="price"
-                      stroke="#a594a8"
-                      strokeWidth={3}
-                      dot={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              ) : (
-                <div style={styles.noData}>Loading chart data...</div>
-              )}
-            </div>
-          </div>
-          <div style={styles.newsCard} className="card-hover">
-            <div style={styles.newsHeader}>
-              <span style={styles.newsIcon}>📰</span>
-              <h3 style={styles.cardTitle}>Latest News</h3>
-            </div>
-            <div style={styles.newsList}>
-              {news.length > 0 ? news.map((item, i) => (
-                <a key={i} href={item.link} style={styles.linkstyle} target="_blank" rel="noopener noreferrer">
-                  <div style={styles.newsItem} className="news-item">
-                    <p style={styles.newsText}>{item.title}</p>
-                  </div>
-                </a>
-              )) : (
-                <div style={styles.noData}>Loading news...</div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div style={styles.tradeCard} className="card-hover">
-          <h3 style={styles.cardTitle}>Trade History</h3>
-          <div style={styles.tableWrapper}>
-            <table style={styles.table}>
-              <thead>
-                <tr style={styles.tableHeaderRow}>
-                  <th style={styles.tableHeader}>ID</th>
-                  <th style={styles.tableHeader}>Asset</th>
-                  <th style={styles.tableHeader}>Entry</th>
-                  <th style={styles.tableHeader}>Exit</th>
-                  <th style={styles.tableHeader}>P&L</th>
-                  <th style={styles.tableHeader}>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {trades.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} style={styles.noTrades}>
-                      {botStatus.isActive
-                        ? 'No trades yet. AI is analyzing the market...'
-                        : 'Start the bot to begin trading'}
-                    </td>
-                  </tr>
-                ) : (
-                  trades.map((trade) => (
-                    <tr key={trade.id} style={styles.tableRow} className="table-row-hover">
-                      <td style={styles.tableCell}>{trade.id}</td>
-                      <td style={{...styles.tableCell, fontWeight: '600'}}>{trade.asset}</td>
-                      <td style={styles.tableCell}>${trade.entry}</td>
-                      <td style={styles.tableCell}>{trade.exit ? `$${trade.exit}` : 'Open'}</td>
-                      <td style={{...styles.tableCell, color: trade.pnl > 0 ? '#6ee7b7' : '#fca5a5', fontWeight: 'bold'}}>
-                        {trade.pnl > 0 ? '+' : ''}{trade.pnl.toFixed(2)}%
-                      </td>
-                      <td style={styles.tableCell}>
-                        <span style={{
-                          ...styles.statusBadge,
-                          backgroundColor: trade.status === 'Active' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(148, 163, 184, 0.2)',
-                          color: trade.status === 'Active' ? '#6ee7b7' : '#cbd5e1',
-                          border: trade.status === 'Active' ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(148, 163, 184, 0.3)'
-                        }}>
-                          {trade.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div style={styles.activityFeed} className="card-hover">
-          <div style={styles.activityHeader}>
-            <h3 style={styles.cardTitle}>Activity Feed</h3>
-            <div style={{fontSize: '0.9rem', color: '#cbd5e1'}}>{sseConnected ? '● Live' : '○ Offline'}</div>
-          </div>
-
-          <div style={styles.feedList}>
-            {logs.length === 0 ? (
-              <div style={styles.noData}>No activity yet</div>
-            ) : (
-              logs.slice(0, 50).map((l) => (
-                <div key={l.id} style={styles.logItem} className="log-item">
-                  <div style={{...styles.logBadge, background: l.level === 'error' ? '#ef4444' : '#6ee7b7'}}></div>
-                  <div style={styles.logContent}>
-                    <div style={styles.logMessage}>{l.message}</div>
-                    <div style={styles.logMeta}>{new Date(l.timestamp).toLocaleString()}</div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
       </div>
+
+      {/* New Live Dashboard Component - Main Content */}
+      <LiveDashboard 
+        coinId={selectedCoin.value} 
+        apiUrl={API_URL}
+        userAddress={undefined}
+      />
+
     </div>
   )
 }

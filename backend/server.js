@@ -193,7 +193,22 @@ async function cachedFetch(key, fetchFunction, duration = CACHE_DURATION) {
  */
 async function fetchPricesFromMultipleSources() {
   const sources = [
-    // Source 1: Binance
+    // Source 1: CoinGecko (supports all coins)
+    async () => {
+      const response = await axios.get('https://api.coingecko.com/api/v3/coins/markets', {
+        params: {
+          vs_currency: 'usd',
+          order: 'market_cap_desc',
+          per_page: 250,
+          page: 1,
+          sparkline: true
+        },
+        timeout: 10000
+      });
+      return parseCoinGeckoData(response.data);
+    },
+    
+    // Source 2: Binance (as backup, limited coins)
     async () => {
       const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'XRPUSDT', 'DOTUSDT'];
       const prices = await Promise.all(
@@ -206,7 +221,7 @@ async function fetchPricesFromMultipleSources() {
       return parseBinanceData(prices);
     },
     
-    // Source 2: CryptoCompare
+    // Source 3: CryptoCompare (as backup, limited coins)
     async () => {
       const response = await axios.get('https://min-api.cryptocompare.com/data/pricemultifull', {
         params: {
@@ -232,6 +247,21 @@ async function fetchPricesFromMultipleSources() {
   // All failed, return mock data
   console.log('🎭 Using mock data');
   return getMockCoins();
+}
+
+function parseCoinGeckoData(data) {
+  return data.map(coin => ({
+    id: coin.id,
+    symbol: coin.symbol.toLowerCase(),
+    name: coin.name,
+    current_price: coin.current_price || 0,
+    price_change_percentage_24h: coin.price_change_percentage_24h || 0,
+    market_cap: coin.market_cap || 0,
+    total_volume: coin.total_volume || 0,
+    sparkline_in_7d: {
+      price: coin.sparkline_in_7d?.price || generateSparkline(coin.current_price || 100)
+    }
+  }));
 }
 
 function parseBinanceData(responses) {
@@ -792,6 +822,222 @@ app.get('/api/bot/status', (req, res) => {
 });
 
 /**
+ * GET /api/webhook/live/:coinId
+ * WebSocket-like endpoint using SSE to stream live data:
+ * - Balance updates
+ * - Trade executions
+ * - AI Signals
+ * - Price updates
+ * - Dynamic analysis
+ * - Chart data
+ */
+app.get('/api/webhook/live/:coinId', (req, res) => {
+  const { coinId } = req.params;
+  
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*'
+  });
+  res.flushHeaders?.();
+
+  // Send initial connection message
+  res.write(`event: connected\ndata: ${JSON.stringify({ 
+    message: 'Connected to live webhook',
+    coinId,
+    timestamp: new Date().toISOString()
+  })}\n\n`);
+
+  // Function to emit live data updates
+  const emitLiveUpdate = async () => {
+    try {
+      const coins = await cachedFetch('all_coins', async () => {
+        return await fetchPricesFromMultipleSources();
+      });
+      
+      const coin = coins.find(c => c.id === coinId);
+      if (!coin) return;
+
+      // Get analysis
+      const analysis = await aiStrategy.analyzeMarket(
+        coin,
+        coin.sparkline_in_7d.price,
+        MOCK_NEWS
+      );
+
+      // Get blockchain data (balance + trades) if available
+      let balance = '0';
+      let trades = [];
+      
+      if (blockchainService) {
+        try {
+          const userAddress = req.query.address || blockchainService.wallet?.address;
+          balance = await blockchainService.getBalance(userAddress);
+          trades = await blockchainService.getTradeHistory(userAddress);
+        } catch (err) {
+          console.error('Blockchain data fetch error:', err.message);
+        }
+      }
+
+      // Emit comprehensive live update
+      const liveUpdate = {
+        event: 'live-update',
+        data: {
+          timestamp: Date.now(),
+          balance: {
+            amount: balance,
+            currency: 'ETH',
+            network: 'Sepolia Testnet'
+          },
+          coin: {
+            id: coin.id,
+            name: coin.name,
+            symbol: coin.symbol,
+            current_price: coin.current_price,
+            price_change_percentage_24h: coin.price_change_percentage_24h,
+            market_cap: coin.market_cap,
+            total_volume: coin.total_volume
+          },
+          price: {
+            current: coin.current_price,
+            change_24h: coin.price_change_percentage_24h,
+            market_cap: coin.market_cap,
+            updated_at: new Date().toISOString()
+          },
+          chart: {
+            prices: coin.sparkline_in_7d.price.slice(-24).map((price, i) => ({
+              time: new Date(Date.now() - (24 - i) * 3600000).toISOString(),
+              price: price
+            }))
+          },
+          aiSignal: {
+            signal: analysis.signal,
+            confidence: analysis.confidence,
+            positionSize: analysis.positionSize
+          },
+          analysis: {
+            signal: analysis.signal,
+            confidence: analysis.confidence,
+            reasoning: analysis.reasoning,
+            positionSize: analysis.positionSize,
+            sentiment: analysis.sentiment || analysis.confidence
+          },
+          trades: trades.map((trade, idx) => ({
+            id: `T${idx + 1}`,
+            asset: coin.symbol,
+            entry: trade.price ? parseFloat(trade.price).toFixed(2) : '0',
+            exit: trade.exit ? parseFloat(trade.exit).toFixed(2) : null,
+            pnl: trade.pnl || 0,
+            status: trade.isActive ? 'Active' : 'Closed',
+            timestamp: new Date(trade.timestamp * 1000).toISOString()
+          }))
+        }
+      };
+
+      res.write(`data: ${JSON.stringify(liveUpdate)}\n\n`);
+    } catch (error) {
+      console.error('Live update error:', error);
+      res.write(`event: error\ndata: ${JSON.stringify({ error: error.message })}\n\n`);
+    }
+  };
+
+  // Initial emit
+  emitLiveUpdate();
+
+  // Set up interval to emit updates (every 5 seconds)
+  const liveInterval = setInterval(emitLiveUpdate, 5000);
+
+  // Clean up on client disconnect
+  req.on('close', () => {
+    clearInterval(liveInterval);
+  });
+});
+
+/**
+ * GET /api/webhook/balance
+ * Stream balance updates only
+ */
+app.get('/api/webhook/balance', async (req, res) => {
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*'
+  });
+  res.flushHeaders?.();
+
+  const emitBalance = async () => {
+    try {
+      if (blockchainService) {
+        const userAddress = req.query.address || blockchainService.wallet?.address;
+        const balance = await blockchainService.getBalance(userAddress);
+        
+        res.write(`data: ${JSON.stringify({
+          type: 'balance-update',
+          balance: {
+            amount: balance,
+            currency: 'ETH',
+            network: 'Sepolia Testnet',
+            updated_at: new Date().toISOString()
+          }
+        })}\n\n`);
+      }
+    } catch (error) {
+      console.error('Balance webhook error:', error);
+    }
+  };
+
+  emitBalance();
+  const interval = setInterval(emitBalance, 10000);
+
+  req.on('close', () => clearInterval(interval));
+});
+
+/**
+ * GET /api/webhook/trades
+ * Stream trade updates only
+ */
+app.get('/api/webhook/trades', async (req, res) => {
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*'
+  });
+  res.flushHeaders?.();
+
+  const emitTrades = async () => {
+    try {
+      if (blockchainService) {
+        const userAddress = req.query.address || blockchainService.wallet?.address;
+        const trades = await blockchainService.getTradeHistory(userAddress);
+        
+        res.write(`data: ${JSON.stringify({
+          type: 'trades-update',
+          trades: trades.map((trade, idx) => ({
+            id: `T${idx + 1}`,
+            asset: trade.asset || 'Unknown',
+            entry: trade.price ? parseFloat(trade.price).toFixed(2) : '0',
+            exit: trade.exit ? parseFloat(trade.exit).toFixed(2) : null,
+            pnl: trade.pnl || 0,
+            status: trade.isActive ? 'Active' : 'Closed',
+            timestamp: new Date(trade.timestamp * 1000).toISOString()
+          }))
+        })}\n\n`);
+      }
+    } catch (error) {
+      console.error('Trades webhook error:', error);
+    }
+  };
+
+  emitTrades();
+  const interval = setInterval(emitTrades, 15000);
+
+  req.on('close', () => clearInterval(interval));
+});
+
+/**
  * POST /api/cache/clear
  * Clear the cache (useful for debugging)
  */
@@ -807,7 +1053,7 @@ app.post('/api/cache/clear', (req, res) => {
 
 // ==================== START SERVER ====================
 
-const PORT = process.env.PORT || 3002;
+const PORT = process.env.PORT || 3001;
 
 app.listen(PORT, () => {
   console.log(`\n Seismic Trading Bot Backend`);

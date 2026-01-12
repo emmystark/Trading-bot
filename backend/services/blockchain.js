@@ -3,7 +3,7 @@
 
 const { ethers } = require('ethers');
 require('dotenv').config();
-const contractABI = require('../../contracts/PrivateTradingBot.json');
+const contractABI = require('../contracts/PrivateTradingBot.json');
 
 /**
  * ====================================================================================
